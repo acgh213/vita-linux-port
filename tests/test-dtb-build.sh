@@ -223,8 +223,63 @@ run_ci_contract_test() {
 		echo "expected CI to run the build-contract regression suite" >&2
 		exit 1
 	}
+	normalize_ci_commands() {
+		awk '
+			{
+				line = $0
+				sub(/^[[:space:]]+/, "", line)
+				if (continued)
+					command = command line
+				else
+					command = line
+				if (command ~ /\\[[:space:]]*$/) {
+					sub(/\\[[:space:]]*$/, " ", command)
+					continued = 1
+					next
+				}
+				gsub(/[[:space:]]+/, " ", command)
+				sub(/^ /, "", command)
+				sub(/ $/, "", command)
+				print command
+				command = ""
+				continued = 0
+			}
+			END {
+				if (command != "")
+					print command
+			}
+		'
+	}
+	linux_commands=$(awk '
+		/^  build-linux:/ { inside = 1; next }
+		/^  build-macos:/ { inside = 0 }
+		inside
+	' "$workflow" | normalize_ci_commands)
+	macos_commands=$(awk '
+		/^  build-macos:/ { inside = 1; next }
+		inside
+	' "$workflow" | normalize_ci_commands)
+	# These are literal workflow command contracts; do not expand substitutions.
+	# shellcheck disable=SC2016
+	expected_linux_dtc='make ARCH=arm CROSS_COMPILE=arm-linux- scripts_dtc -j$(nproc)'
+	# shellcheck disable=SC2016
+	expected_macos_dtc='gmake ARCH=arm LLVM=1 HOSTCFLAGS="-Iscripts/macos-include -I$(brew --prefix libelf)/include" scripts_dtc -j$(sysctl -n hw.ncpu)'
+	linux_dtc_count=$(printf '%s\n' "$linux_commands" |
+		grep -Fxc "$expected_linux_dtc" || true)
+	macos_dtc_count=$(printf '%s\n' "$macos_commands" |
+		grep -Fxc "$expected_macos_dtc" || true)
+	if test "$linux_dtc_count" -ne 1 || test "$macos_dtc_count" -ne 1; then
+		echo "expected the exact scripts_dtc make command in each CI job; found Linux=$linux_dtc_count macOS=$macos_dtc_count" >&2
+		exit 1
+	fi
+	full_scripts_pattern='g?make.*[[:space:]]scripts([^[:alnum:]_-]|$)'
+	if printf '%s\n%s\n' "$linux_commands" "$macos_commands" |
+		grep -Eq "$full_scripts_pattern"; then
+		echo "CI still builds unrelated kernel host tools" >&2
+		exit 1
+	fi
 	if grep -q 'scripts/dtc/dtc' "$workflow"; then
-		echo "CI still contains a duplicate direct dtc recipe" >&2
+		echo "CI still contains a direct dtc invocation" >&2
 		exit 1
 	fi
 	if grep -q 'linux_vita/arch/arm/boot/dts' "$workflow"; then

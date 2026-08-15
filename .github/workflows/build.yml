@@ -56,11 +56,11 @@ jobs:
           sed -i 's|^CONFIG_INITRAMFS_SOURCE=.*|CONFIG_INITRAMFS_SOURCE=""|' .config
           make ARCH=arm CROSS_COMPILE=arm-linux- olddefconfig
 
-      - name: Build host scripts
+      - name: Build device tree compiler
         working-directory: linux_vita
         run: |
           export PATH="${{ github.workspace }}/.toolchains/${{ env.BOOTLIN_DIR }}/bin:$PATH"
-          make ARCH=arm CROSS_COMPILE=arm-linux- scripts -j$(nproc)
+          make ARCH=arm CROSS_COMPILE=arm-linux- scripts_dtc -j$(nproc)
 
       - name: Build device trees
         run: |
@@ -99,13 +99,13 @@ jobs:
             HOSTCFLAGS="-Iscripts/macos-include -I$(brew --prefix libelf)/include" \
             olddefconfig
 
-      - name: Build host scripts
+      - name: Build device tree compiler
         working-directory: linux_vita
         run: |
           export PATH="$(brew --prefix findutils)/libexec/gnubin:$(brew --prefix gnu-sed)/libexec/gnubin:$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
           gmake ARCH=arm LLVM=1 \
             HOSTCFLAGS="-Iscripts/macos-include -I$(brew --prefix libelf)/include" \
-            scripts -j$(sysctl -n hw.ncpu)
+            scripts_dtc -j$(sysctl -n hw.ncpu)
 
       - name: Build device trees
         run: |
