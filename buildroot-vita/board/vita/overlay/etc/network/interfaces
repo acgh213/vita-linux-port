@@ -5,3 +5,9 @@ iface lo inet loopback
 iface mlan0 inet dhcp
     pre-up wpa_supplicant -B -i mlan0 -c /etc/wpa_supplicant.conf
     post-down killall wpa_supplicant 2>/dev/null
+
+# Wired Ethernet (internal Realtek via bus-2 cdc_ether). Deliberately NOT
+# auto: S41eth brings it up in the background once the interface exists, so
+# a missing cable can never block S40network's foreground ifup -a (the
+# suspected cause of the cycle 17b/18 network-dark boots, rootfs 2cb7ef8e).
+iface eth0 inet dhcp

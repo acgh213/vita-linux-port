@@ -1,0 +1,42 @@
+#!/bin/sh
+# Wait for eth0 (cdc_ether async USB probe) then bring up wired DHCP.
+# Background like S45wifi; debug output on tty0 (HDMI).
+# The internal Realtek NIC enumerates a few seconds into boot once the
+# bus-2 host-mode latch has run (clk-vita-pervasive, commit 903de6781104).
+
+IFACE=eth0
+TIMEOUT=30
+
+case "$1" in
+start)
+    (
+        exec > /dev/tty0 2>&1
+        echo "[eth] waiting for $IFACE..."
+        i=0
+        while [ $i -lt $TIMEOUT ]; do
+            if [ -d /sys/class/net/$IFACE ]; then
+                echo "[eth] $IFACE present after ${i}s"
+                break
+            fi
+            sleep 1
+            i=$((i + 1))
+        done
+        if [ -d /sys/class/net/$IFACE ]; then
+            echo "[eth] bringing up $IFACE (ifup)..."
+            /sbin/ifup $IFACE 2>&1
+            echo "[eth] ifup exit: $?"
+            echo "[eth] addr: $(ip -4 addr show $IFACE 2>/dev/null | grep inet || echo NONE)"
+        else
+            echo "[eth] $IFACE not found after ${TIMEOUT}s"
+        fi
+    ) &
+    echo "OK (background)"
+    ;;
+stop)
+    /sbin/ifdown $IFACE 2>/dev/null
+    echo "OK"
+    ;;
+*)
+    echo "Usage: $0 {start|stop}"
+    ;;
+esac
