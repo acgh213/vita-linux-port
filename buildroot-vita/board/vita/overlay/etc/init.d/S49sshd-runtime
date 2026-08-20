@@ -1,0 +1,13 @@
+#!/bin/sh
+# OpenSSH 10.x requires its privilege-separation directory at runtime.
+# /run is volatile and may be recreated during boot, so this must happen
+# immediately before Buildroot's S50sshd rather than only in post_build.sh.
+
+case "$1" in
+start)
+    mkdir -p /run/sshd
+    chmod 755 /run/sshd
+    ;;
+stop)
+    ;;
+esac
