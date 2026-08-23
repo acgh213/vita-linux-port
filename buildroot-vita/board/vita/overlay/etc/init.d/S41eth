@@ -2,7 +2,7 @@
 # Wait for eth0 (cdc_ether async USB probe) then bring up wired DHCP.
 # Background like S45wifi; debug output on tty0 (HDMI).
 # The internal Realtek NIC enumerates a few seconds into boot once the
-# bus-2 host-mode latch has run (clk-vita-pervasive, commit 903de6781104).
+# bus-2 host-mode latch has run (clk-vita-pervasive, commit 2bc15a5d3f9e).
 
 IFACE=eth0
 TIMEOUT=30
