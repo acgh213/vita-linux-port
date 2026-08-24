@@ -25,6 +25,41 @@ assert_contains() {
     esac
 }
 
+assert_empty_file() {
+    file=$1
+    [ ! -s "$file" ] || fail "expected $file to be empty"
+}
+
+run_help_diagnostic_test() {
+    output=$TMP_ROOT/help-output
+    error=$TMP_ROOT/help-error
+    if "$VERIFIER" --help >"$output" 2>"$error"; then
+        status=0
+    else
+        status=$?
+    fi
+    [ "$status" -eq 0 ] || fail "--help exited with status $status"
+    assert_contains "$(cat "$output")" 'Usage: verify-baseline.sh'
+    assert_empty_file "$error"
+    printf 'ok - --help uses stdout and status 0\n'
+}
+
+run_invalid_diagnostic_test() {
+    label=$1
+    shift
+    output=$TMP_ROOT/invalid-output
+    error=$TMP_ROOT/invalid-error
+    if "$VERIFIER" "$@" >"$output" 2>"$error"; then
+        fail "$label unexpectedly passed"
+    else
+        status=$?
+    fi
+    [ "$status" -eq 2 ] || fail "$label exited with status $status"
+    assert_contains "$(cat "$error")" 'Usage: verify-baseline.sh'
+    assert_empty_file "$output"
+    printf 'ok - %s uses stderr and status 2\n' "$label"
+}
+
 run_ok() {
     label=$1
     shift
@@ -118,6 +153,10 @@ EOF
 }
 
 mkdir -p "$TMP_ROOT"
+
+run_help_diagnostic_test
+run_invalid_diagnostic_test 'invalid option' --bogus
+run_invalid_diagnostic_test 'missing --repo argument' --repo
 
 make_fixture matching
 run_fail 'test hook requires explicit nonproduction override' 'expected constants require --allow-nonproduction' \

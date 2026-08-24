@@ -33,7 +33,11 @@ fail() {
 
 usage() {
     status=${1:-2}
-    printf '%s\n' 'Usage: verify-baseline.sh [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction] [--allow-nonproduction]'
+    if [ "$status" -eq 0 ]; then
+        printf '%s\n' 'Usage: verify-baseline.sh [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction] [--allow-nonproduction]'
+    else
+        printf '%s\n' 'Usage: verify-baseline.sh [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction] [--allow-nonproduction]' >&2
+    fi
     exit "$status"
 }
 
