@@ -94,8 +94,12 @@ make_fake_final_mv() {
 set -eu
 source=$1
 destination=$2
+if [ "$source" = -T ]; then
+    source=$2
+    destination=$3
+fi
 case "$source:$destination" in
-    */.fixtures.*:*/fixtures) exit 1 ;;
+    */.fixtures-link.*:*/fixtures) exit 1 ;;
 esac
 exec /bin/mv "$source" "$destination"
 EOF_FINAL_MV
@@ -115,12 +119,25 @@ if PATH="$FAKE_MAKE_DIR:$PATH" "$CART_DIR/tests/test_fixture_immutability.sh" \
     cat "$TMP_ROOT/immutability-output" "$TMP_ROOT/immutability-error" >&2
     fail 'immutability harness accepted unrelated child make failure'
 fi
+if ! grep -a -F -q -- \
+    'not ok - make test failed without reporting the expected fixture hash mismatch' \
+    "$TMP_ROOT/immutability-output" "$TMP_ROOT/immutability-error"; then
+    cat "$TMP_ROOT/immutability-output" "$TMP_ROOT/immutability-error" >&2
+    fail 'immutability harness did not reject the unrelated child failure for the expected reason'
+fi
+if grep -a -F -q -- \
+    'ok - make test rejects corrupted committed fixtures without regeneration' \
+    "$TMP_ROOT/immutability-output" "$TMP_ROOT/immutability-error"; then
+    cat "$TMP_ROOT/immutability-output" "$TMP_ROOT/immutability-error" >&2
+    fail 'immutability harness reported success after an unrelated child failure'
+fi
 
 # A failed scene must not publish a partial build/fixtures directory.
 ATOMIC_CART=$TMP_ROOT/atomic-cart
 copy_cart "$ATOMIC_CART"
-mkdir -p "$ATOMIC_CART/build/fixtures"
-printf '%s\n' old-generation >"$ATOMIC_CART/build/fixtures/sentinel"
+mkdir -p "$ATOMIC_CART/build/.fixtures-old"
+printf '%s\n' old-generation >"$ATOMIC_CART/build/.fixtures-old/sentinel"
+ln -s .fixtures-old "$ATOMIC_CART/build/fixtures"
 make_fake_capture "$TMP_ROOT/failing-capture"
 : >"$TMP_ROOT/failing-source"
 touch "$TMP_ROOT/failing-capture"
@@ -132,8 +149,31 @@ if make -C "$ATOMIC_CART" host-capture CAPTURE_BIN="$TMP_ROOT/failing-capture" \
 fi
 [ -f "$ATOMIC_CART/build/fixtures/sentinel" ] || \
     fail 'failed host-capture discarded the previous fixture generation'
+[ -L "$ATOMIC_CART/build/fixtures" ] || \
+    fail 'failed host-capture replaced the previous symlink generation'
 [ ! -f "$ATOMIC_CART/build/fixtures/scene-0-frame-120.ppm" ] || \
     fail 'failed host-capture published a partial fixture generation'
+
+# A legacy real directory must fail before capture rather than creating a
+# publication gap or silently changing the supported representation.
+REAL_DIR_CART=$TMP_ROOT/real-dir-cart
+copy_cart "$REAL_DIR_CART"
+mkdir -p "$REAL_DIR_CART/build/fixtures"
+printf '%s\n' old-real-directory >"$REAL_DIR_CART/build/fixtures/sentinel"
+if make -C "$REAL_DIR_CART" host-capture \
+    >"$TMP_ROOT/real-dir-output" 2>"$TMP_ROOT/real-dir-error"; then
+    cat "$TMP_ROOT/real-dir-output" "$TMP_ROOT/real-dir-error" >&2
+    fail 'host-capture silently accepted a legacy real fixtures directory'
+fi
+if ! grep -a -F -q -- 'build/fixtures must be a symlink' \
+    "$TMP_ROOT/real-dir-output" "$TMP_ROOT/real-dir-error"; then
+    cat "$TMP_ROOT/real-dir-output" "$TMP_ROOT/real-dir-error" >&2
+    fail 'legacy real fixtures directory failure lacked its explicit diagnostic'
+fi
+[ "$(cat "$REAL_DIR_CART/build/fixtures/sentinel")" = old-real-directory ] || \
+    fail 'legacy real fixtures directory was mutated before rejection'
+[ ! -e "$REAL_DIR_CART/build/.fixtures" ] || \
+    fail 'legacy real fixtures rejection left a capture stage behind'
 
 # The host binaries and generated wrapper must not be reused after a rebuild
 # request, even when their mtimes make them look newer than their inputs.
@@ -183,13 +223,15 @@ if ! grep -a -F -q -- 'generated fixture' "$TMP_ROOT/mismatch-output" "$TMP_ROOT
     fail 'make test did not report the generated fixture comparison failure'
 fi
 
-# Publication backups must use a unique mktemp-created path rather than a PID
-# suffix that can collide with a pre-existing directory.
-grep -F -q "mktemp -d \"\$(BUILD_DIR)/.fixtures-old.XXXXXX\"" "$CART_DIR/Makefile" || \
-    fail 'fixture publication backup is not mktemp-created'
-if grep -F -q 'GENERATED_FIXTURES).old.$$' "$CART_DIR/Makefile"; then
-    fail 'fixture publication backup still uses a collidable PID suffix'
-fi
+# Publication must use a sibling temporary symlink and an atomic final rename.
+grep -F -q "mktemp \"\$(BUILD_DIR)/.fixtures-link.XXXXXX\"" "$CART_DIR/Makefile" || \
+    fail 'fixture publication does not allocate a temporary symlink path'
+grep -F -q 'ln -s' "$CART_DIR/Makefile" || \
+    fail 'fixture publication does not create a symlink generation'
+grep -F -q 'mv -T' "$CART_DIR/Makefile" || \
+    fail 'fixture publication does not replace the symlink itself'
+grep -F -q 'CART_IMMUTABILITY_GUARD' "$CART_DIR/Makefile" || \
+    fail 'fixture immutability recursion lacks an explicit internal guard'
 
 # Shell traps must use POSIX trap 0 and exit through the cleanup handler on
 # signals; EXIT is not portable and signal traps must not continue execution.
@@ -205,7 +247,7 @@ TEST_CART=$TMP_ROOT/test-cart
 copy_cart "$TEST_CART"
 FAKE_TOOLS=$TMP_ROOT/fake-tools
 make_fake_cross_tools "$FAKE_TOOLS"
-PATH="$FAKE_TOOLS:$PATH" CART_SKIP_IMMUTABILITY=1 \
+PATH="$FAKE_TOOLS:$PATH" CART_IMMUTABILITY_GUARD=child \
     make -C "$TEST_CART" test CROSS_CC="$FAKE_TOOLS/cross-cc" CC=cc \
     >"$TMP_ROOT/test-output" 2>"$TMP_ROOT/test-error" || {
         cat "$TMP_ROOT/test-output" "$TMP_ROOT/test-error" >&2
@@ -213,6 +255,8 @@ PATH="$FAKE_TOOLS:$PATH" CART_SKIP_IMMUTABILITY=1 \
     }
 [ -f "$TEST_CART/build/fixtures/manifest.txt" ] || \
     fail 'make test did not run host-capture'
+[ -L "$TEST_CART/build/fixtures" ] || \
+    fail 'make test did not publish fixtures through a symlink'
 scene=0
 while [ "$scene" -lt 6 ]; do
     [ -f "$TEST_CART/build/fixtures/scene-$scene-frame-120.ppm" ] || \
@@ -237,8 +281,9 @@ cmp -s "$TEST_CART/tests/fixtures/scene-0-frame-120.ppm" "$SCENE_0" || \
 # generation instead of being reported as a successful capture.
 RENAME_CART=$TMP_ROOT/rename-cart
 copy_cart "$RENAME_CART"
-mkdir -p "$RENAME_CART/build/fixtures"
-printf '%s\n' old-generation >"$RENAME_CART/build/fixtures/sentinel"
+mkdir -p "$RENAME_CART/build/.fixtures-old"
+printf '%s\n' old-generation >"$RENAME_CART/build/.fixtures-old/sentinel"
+ln -s .fixtures-old "$RENAME_CART/build/fixtures"
 RENAME_TOOLS=$TMP_ROOT/rename-tools
 mkdir -p "$RENAME_TOOLS"
 make_fake_final_mv "$RENAME_TOOLS/mv"

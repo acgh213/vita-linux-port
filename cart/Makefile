@@ -11,7 +11,6 @@ CAPTURE_BIN := $(BUILD_DIR)/capture-host
 FIXTURES := $(CART_DIR)/tests/fixtures
 MANIFEST := $(FIXTURES)/manifest.txt
 GENERATED_FIXTURES := $(BUILD_DIR)/fixtures
-GENERATED_MANIFEST := $(GENERATED_FIXTURES)/manifest.txt
 DEFAULT_CAPTURE_SRC := $(BUILD_DIR)/capture-host.c
 DEFAULT_CAPTURE_BIN := $(BUILD_DIR)/capture-host
 
@@ -44,18 +43,33 @@ endif
 host-capture: $(CAPTURE_BIN)
 	@set -eu; \
 	mkdir -p "$(BUILD_DIR)"; \
+	if [ -e "$(GENERATED_FIXTURES)" ] && [ ! -L "$(GENERATED_FIXTURES)" ]; then \
+		printf '%s\n' 'FAIL build/fixtures must be a symlink; remove the legacy real directory before capturing' >&2; \
+		exit 1; \
+	fi; \
 	stage=$$(mktemp -d "$(BUILD_DIR)/.fixtures.XXXXXX"); \
+	stage=$$(CDPATH='' cd -- "$$stage" && pwd -P); \
+	link=$$(mktemp "$(BUILD_DIR)/.fixtures-link.XXXXXX"); \
+	rm -f "$$link"; \
+	published=0; \
 	old=; \
+	build_real=$$(CDPATH='' cd -- "$(BUILD_DIR)" && pwd -P); \
+	if [ -L "$(GENERATED_FIXTURES)" ]; then old=$$(readlink "$(GENERATED_FIXTURES)"); fi; \
 	cleanup() { \
 		status=$$?; \
 		trap - 0 HUP INT TERM; \
-		rm -rf "$$stage"; \
-		if [ -n "$$old" ] && [ ! -e "$(GENERATED_FIXTURES)" ] && [ ! -L "$(GENERATED_FIXTURES)" ] && [ -e "$$old" ]; then \
-			mv "$$old" "$(GENERATED_FIXTURES)" || status=1; \
-			old=; \
+		rm -f "$$link" || status=1; \
+		if [ "$$published" -eq 0 ]; then \
+			rm -rf "$$stage" || status=1; \
 		fi; \
-		if [ -n "$$old" ] && [ -e "$$old" ]; then \
-			rm -rf "$$old" || status=1; \
+		if [ "$$published" -eq 1 ] && [ -n "$$old" ]; then \
+			case "$$old" in \
+				/*) old_path=$$old ;; \
+				*) old_path="$$build_real/$${old#./}" ;; \
+			esac; \
+			case "$$old_path/" in \
+				"$$build_real"/.fixtures-*/*|"$$build_real"/.fixtures.*/*) rm -rf "$$old_path" || status=1 ;; \
+			esac; \
 		fi; \
 		exit "$$status"; \
 	}; \
@@ -77,21 +91,14 @@ host-capture: $(CAPTURE_BIN)
 		test -s "$$stage/scene-$$scene-frame-120.ppm"; \
 	done; \
 	test -s "$$stage/manifest.txt"; \
-	if [ -e "$(GENERATED_FIXTURES)" ] || [ -L "$(GENERATED_FIXTURES)" ]; then \
-		old=$$(mktemp -d "$(BUILD_DIR)/.fixtures-old.XXXXXX"); \
-		rmdir "$$old"; \
-		mv "$(GENERATED_FIXTURES)" "$$old"; \
-	fi; \
-	if mv "$$stage" "$(GENERATED_FIXTURES)"; then \
+	ln -s "$$stage" "$$link"; \
+	if mv -T "$$link" "$(GENERATED_FIXTURES)"; then \
 		:; \
 	else \
 		status=$$?; \
-		if [ -n "$$old" ] && [ -e "$$old" ]; then mv "$$old" "$(GENERATED_FIXTURES)" || status=1; fi; \
 		exit "$$status"; \
 	fi; \
-	if [ -n "$$old" ]; then rm -rf "$$old"; fi; \
-	old=; \
-	trap - 0 HUP INT TERM
+	published=1; exit 0
 
 capture: host-capture
 
@@ -109,7 +116,8 @@ cross-verify: cross-build
 
 test: host-sanitize host-capture
 	"$(SHELL)" "$(CART_DIR)/tests/test_legacy_render.sh" --verify-only --compare-to "$(GENERATED_FIXTURES)"
-	@if [ -z "$${CART_SKIP_IMMUTABILITY:-}" ]; then \
+	@if [ "$${CART_IMMUTABILITY_GUARD:-}" != child ] && [ -z "$${CART_SKIP_IMMUTABILITY:-}" ]; then \
+		CART_IMMUTABILITY_GUARD=child CART_SKIP_IMMUTABILITY=1 \
 		"$(SHELL)" "$(CART_DIR)/tests/test_fixture_immutability.sh"; \
 	fi
 	$(MAKE) cross-verify
