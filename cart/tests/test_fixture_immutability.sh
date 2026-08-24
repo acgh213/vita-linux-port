@@ -22,7 +22,7 @@ CORRUPTED=$COPY/tests/fixtures/scene-0-frame-120.ppm
 MARKER='corrupted committed fixture must survive make test'
 printf '%s\n' "$MARKER" >>"$CORRUPTED"
 
-if make -C "$COPY" test >"$TMP_ROOT/output" 2>"$TMP_ROOT/error"; then
+if CART_SKIP_IMMUTABILITY=1 make -C "$COPY" test >"$TMP_ROOT/output" 2>"$TMP_ROOT/error"; then
     cat "$TMP_ROOT/output" "$TMP_ROOT/error" >&2
     fail 'make test unexpectedly accepted a corrupted committed fixture'
 fi

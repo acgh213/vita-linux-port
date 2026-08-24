@@ -56,6 +56,9 @@ cross-verify: cross-build
 
 test: host-sanitize
 	$(SHELL) $(CART_DIR)/tests/test_legacy_render.sh --verify-only
+	@if [ -z "$${CART_SKIP_IMMUTABILITY:-}" ]; then \
+		$(SHELL) $(CART_DIR)/tests/test_fixture_immutability.sh; \
+	fi
 	$(MAKE) cross-verify
 
 clean:
