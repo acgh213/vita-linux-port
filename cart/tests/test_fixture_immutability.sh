@@ -18,6 +18,7 @@ fail() {
 
 COPY=$TMP_ROOT/cart
 cp -R "$CART_DIR" "$COPY"
+rm -rf "$COPY/build"
 CORRUPTED=$COPY/tests/fixtures/scene-0-frame-120.ppm
 MARKER='corrupted committed fixture must survive make test'
 printf '%s\n' "$MARKER" >>"$CORRUPTED"
@@ -30,6 +31,11 @@ fi
 if ! grep -a -F -q -- "$MARKER" "$CORRUPTED"; then
     cat "$TMP_ROOT/output" "$TMP_ROOT/error" >&2
     fail 'make test regenerated the corrupted committed fixture'
+fi
+
+if ! grep -a -F -q -- 'scene-0-frame-120.ppm hash (' "$TMP_ROOT/output" "$TMP_ROOT/error"; then
+    cat "$TMP_ROOT/output" "$TMP_ROOT/error" >&2
+    fail 'make test failed without reporting the expected fixture hash mismatch'
 fi
 
 printf 'ok - make test rejects corrupted committed fixtures without regeneration\n'
