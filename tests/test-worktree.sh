@@ -8,9 +8,12 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 export GIT_ALLOW_PROTOCOL=file
 
 kernel_repo="$tmp/kernel.git"
+other_kernel_repo="$tmp/other-kernel.git"
 fixture="$tmp/fixture"
+post_clone_fixture="$tmp/post-clone-fixture"
 worktrees="$tmp/worktrees"
-mkdir -p "$kernel_repo" "$fixture" "$worktrees" "$tmp/home"
+mkdir -p "$kernel_repo" "$other_kernel_repo" "$fixture" \
+	"$post_clone_fixture" "$worktrees" "$tmp/home"
 
 git -C "$kernel_repo" init -q
 git -C "$kernel_repo" config user.name 'Worktree Test'
@@ -18,6 +21,26 @@ git -C "$kernel_repo" config user.email 'worktree-test@example.invalid'
 printf 'kernel fixture\n' >"$kernel_repo/README"
 git -C "$kernel_repo" add README
 git -C "$kernel_repo" commit -q -m 'kernel fixture'
+missing_gitlink=$(git -C "$kernel_repo" rev-parse HEAD)
+
+git -C "$other_kernel_repo" init -q
+git -C "$other_kernel_repo" config user.name 'Worktree Test'
+git -C "$other_kernel_repo" config user.email 'worktree-test@example.invalid'
+printf 'different kernel history\n' >"$other_kernel_repo/README"
+git -C "$other_kernel_repo" add README
+git -C "$other_kernel_repo" commit -q -m 'different kernel fixture'
+
+git -C "$post_clone_fixture" init -q
+git -C "$post_clone_fixture" config user.name 'Worktree Test'
+git -C "$post_clone_fixture" config user.email 'worktree-test@example.invalid'
+git -C "$post_clone_fixture" config protocol.file.allow always
+cp "$repo_dir/Makefile" "$post_clone_fixture/Makefile"
+printf '[submodule "linux_vita"]\n\tpath = linux_vita\n\turl = %s\n' \
+	"$other_kernel_repo" >"$post_clone_fixture/.gitmodules"
+git -C "$post_clone_fixture" add Makefile .gitmodules
+git -C "$post_clone_fixture" update-index --add --cacheinfo \
+	"160000,$missing_gitlink,linux_vita"
+git -C "$post_clone_fixture" commit -q -m 'fixture with unavailable gitlink'
 
 git -C "$fixture" init -q
 git -C "$fixture" config user.name 'Worktree Test'
@@ -66,6 +89,45 @@ if [ -e "$worktrees/failed-init/linux_vita" ]; then
 fi
 if [ "$failed" -ne 0 ]; then
 	cat "$tmp/failed-init.out" >&2
+	exit 1
+fi
+
+# A cloneable repository that lacks the recorded gitlink fails only after Git
+# has populated submodule metadata. Rollback must remove and unregister the
+# entire failed integration worktree. The newly created branch is retained so
+# a retry can reuse it.
+post_clone_dest="$worktrees/post-clone-failure"
+set +e
+"$make_cmd" -s -C "$post_clone_fixture" worktree \
+	NAME=post-clone-failure INIT_SUBMODULES=1 WORKTREE_BASE_DIR="$worktrees" \
+	HOME="$tmp/home" >"$tmp/post-clone-failure.out" 2>&1
+status=$?
+set -e
+failed=0
+if [ "$status" -eq 0 ]; then
+	echo 'worktree target masked post-clone submodule failure' >&2
+	failed=1
+fi
+if ! git -C "$post_clone_fixture" show-ref --verify --quiet \
+	"refs/heads/post-clone-failure"; then
+	echo 'worktree rollback unexpectedly removed the retained branch' >&2
+	failed=1
+fi
+if [ -e "$post_clone_dest/linux_vita/.git" ]; then
+	echo 'worktree rollback left populated submodule metadata after checkout failed' >&2
+	failed=1
+fi
+if [ -e "$post_clone_dest" ]; then
+	echo 'worktree rollback left the failed integration worktree on disk' >&2
+	failed=1
+fi
+if git -C "$post_clone_fixture" worktree list --porcelain |
+	grep -Fqx "worktree $post_clone_dest"; then
+	echo 'worktree rollback left the failed integration worktree registered' >&2
+	failed=1
+fi
+if [ "$failed" -ne 0 ]; then
+	cat "$tmp/post-clone-failure.out" >&2
 	exit 1
 fi
 

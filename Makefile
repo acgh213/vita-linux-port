@@ -410,8 +410,13 @@ worktree: ## create outer worktree at ../vita-wt/<NAME>
 	if [ "$(INIT_SUBMODULES)" = "1" ]; then \
 		echo "Initializing submodules (integration worktree)..."; \
 		if ! git -C "$$DEST" submodule update --init; then \
-			echo "ERROR: Submodule initialization failed; integration worktree is incomplete."; \
-			rmdir "$$DEST/linux_vita" 2>/dev/null || true; \
+			echo "ERROR: Submodule initialization failed; rolling back integration worktree."; \
+			if git worktree remove --force "$$DEST"; then \
+				echo "Rolled back failed integration worktree at $$DEST."; \
+				echo "  Branch $(NAME) was retained for retry."; \
+			else \
+				echo "ERROR: Rollback failed; integration worktree retained at $$DEST." >&2; \
+			fi; \
 			exit 1; \
 		fi; \
 		if [ "$(UNAME_S)" = "Darwin" ]; then \
