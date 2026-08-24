@@ -4,7 +4,7 @@
 	branch = vita-pstv
 [submodule "vita-baremetal-linux-loader"]
 	path = vita-baremetal-linux-loader
-	url = https://github.com/incognitojam/vita-baremetal-linux-loader.git
+	url = https://github.com/acgh213/vita-baremetal-linux-loader.git
 	branch = vita-port
 [submodule "fastfetch"]
 	path = fastfetch
