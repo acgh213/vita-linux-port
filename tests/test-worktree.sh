@@ -6,6 +6,8 @@ make_cmd=${MAKE_CMD:-make}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/vita-worktree-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 export GIT_ALLOW_PROTOCOL=file
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_NOSYSTEM=1
 
 kernel_repo="$tmp/kernel.git"
 other_kernel_repo="$tmp/other-kernel.git"
@@ -65,6 +67,40 @@ if ! "$make_cmd" -s -C "$fixture" worktree \
 fi
 test -d "$worktrees/no-init"
 test ! -e "$worktrees/no-init/linux_vita/rootfs.cpio.zst"
+
+# Re-running against an existing worktree must stop when `git worktree add`
+# fails. In particular, later submodule failure must not roll back a worktree
+# this invocation did not create or delete its untracked files.
+sentinel="$worktrees/no-init/untracked-sentinel"
+printf 'preserve me\n' >"$sentinel"
+set +e
+"$make_cmd" -s -C "$fixture" worktree \
+	NAME=no-init INIT_SUBMODULES=1 WORKTREE_BASE_DIR="$worktrees" \
+	HOME="$tmp/home" >"$tmp/existing-worktree.out" 2>&1
+status=$?
+set -e
+failed=0
+if [ "$status" -eq 0 ]; then
+	echo 'worktree target accepted an already-registered destination' >&2
+	failed=1
+fi
+if [ ! -d "$worktrees/no-init" ] || [ ! -f "$sentinel" ]; then
+	echo 'failed worktree add deleted the pre-existing worktree or sentinel' >&2
+	failed=1
+fi
+if ! git -C "$fixture" worktree list --porcelain |
+	grep -Fqx "worktree $worktrees/no-init"; then
+	echo 'failed worktree add unregistered the pre-existing worktree' >&2
+	failed=1
+fi
+if grep -q 'Initializing submodules' "$tmp/existing-worktree.out"; then
+	echo 'worktree target continued to submodule initialization after add failed' >&2
+	failed=1
+fi
+if [ "$failed" -ne 0 ]; then
+	cat "$tmp/existing-worktree.out" >&2
+	exit 1
+fi
 
 # A failed initialization must be reported and must not leave a stale path that
 # blocks a later clone (especially one populated by the source worktree rootfs).

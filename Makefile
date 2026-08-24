@@ -391,7 +391,8 @@ worktree: ## create outer worktree at ../vita-wt/<NAME>
 		echo "ERROR: NAME is required. Usage: make worktree NAME=<name> [BASE=HEAD]"; \
 		exit 1; \
 	fi
-	@DEST="$(WORKTREE_BASE_DIR)/$(NAME)"; \
+	@set -e; \
+	DEST="$(WORKTREE_BASE_DIR)/$(NAME)"; \
 	echo "Creating outer worktree at $$DEST..."; \
 	if git show-ref --verify --quiet "refs/heads/$(NAME)" 2>/dev/null; then \
 		echo "  Branch $(NAME) exists locally"; \
