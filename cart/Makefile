@@ -10,6 +10,8 @@ CAPTURE_SRC := $(BUILD_DIR)/capture-host.c
 CAPTURE_BIN := $(BUILD_DIR)/capture-host
 FIXTURES := $(CART_DIR)/tests/fixtures
 MANIFEST := $(FIXTURES)/manifest.txt
+GENERATED_FIXTURES := $(BUILD_DIR)/fixtures
+GENERATED_MANIFEST := $(GENERATED_FIXTURES)/manifest.txt
 
 HOST_CFLAGS := -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
 HOST_LDFLAGS := -fsanitize=address,undefined
@@ -34,14 +36,15 @@ $(CAPTURE_BIN): $(CAPTURE_SRC)
 	$(CC) $(HOST_CFLAGS) $(CAPTURE_SRC) $(HOST_LDFLAGS) -pthread -lm -o $@
 
 host-capture: $(CAPTURE_BIN)
-	@mkdir -p $(FIXTURES)
-	@set -eu; for scene in 0 1 2 3 4 5; do $(CAPTURE_BIN) "$$scene" 120 $(FIXTURES)/scene-"$$scene"-frame-120.ppm; done
-	@tmp=$(MANIFEST).tmp.$$; trap 'rm -f "$$tmp"' 0 HUP INT TERM; { printf '%s\n' 'manifest_version=1' 'logical_width=320' 'logical_height=180' 'capture_width=320' 'capture_height=180' 'scene_count=6' 'frame=120'; for scene in 0 1 2 3 4 5; do printf 'scene_%s_sha256=%s\n' "$$scene" "$$(sha256sum $(FIXTURES)/scene-"$$scene"-frame-120.ppm | awk '{print $$1}')"; done; } > "$$tmp"; mv "$$tmp" $(MANIFEST); trap - 0
+	@mkdir -p $(GENERATED_FIXTURES)
+	@set -eu; for scene in 0 1 2 3 4 5; do $(CAPTURE_BIN) "$$scene" 120 $(GENERATED_FIXTURES)/scene-"$$scene"-frame-120.ppm; done
+	@tmp=$(GENERATED_MANIFEST).tmp.$$; trap 'rm -f "$$tmp"' 0 HUP INT TERM; { printf '%s\n' 'manifest_version=1' 'logical_width=320' 'logical_height=180' 'capture_width=320' 'capture_height=180' 'scene_count=6' 'frame=120'; for scene in 0 1 2 3 4 5; do printf 'scene_%s_sha256=%s\n' "$$scene" "$$(sha256sum $(GENERATED_FIXTURES)/scene-"$$scene"-frame-120.ppm | awk '{print $$1}')"; done; } > "$$tmp"; mv "$$tmp" $(GENERATED_MANIFEST); trap - 0
 
 capture: host-capture
 
 cross-build:
 	@mkdir -p $(BUILD_DIR)
+	@command -v "$(CROSS_CC)" >/dev/null 2>&1 || { printf 'FAIL cross-build: %s not found\n' "$(CROSS_CC)" >&2; exit 1; }
 	$(CROSS_CC) $(TARGET_CFLAGS) $(SRC) -lm -o $(TARGET_BIN)
 
 cross-verify: cross-build
@@ -51,11 +54,9 @@ cross-verify: cross-build
 	@readelf -h $(TARGET_BIN) | grep -q 'Flags:.*hard-float ABI'
 	@if readelf -l $(TARGET_BIN) | grep -q 'INTERP'; then printf '%s\n' 'FAIL cross-verify: dynamic interpreter present' >&2; exit 1; fi
 
-# The regression invokes the sanitizer capture path and cross-build when the
-# configured compiler is available; it never contacts hardware or the network.
-test: host-sanitize host-capture
+test: host-sanitize
 	$(SHELL) $(CART_DIR)/tests/test_legacy_render.sh --verify-only
-	@if command -v $(CROSS_CC) >/dev/null 2>&1; then $(MAKE) cross-verify; else printf '%s\n' "SKIP cross-build: $(CROSS_CC) not found"; fi
+	$(MAKE) cross-verify
 
 clean:
 	rm -rf $(BUILD_DIR)
