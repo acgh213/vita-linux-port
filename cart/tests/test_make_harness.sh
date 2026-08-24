@@ -6,6 +6,7 @@ SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 CART_DIR=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd -P)
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cart-make-harness.XXXXXX") || exit 1
 REAL_MAKE=$(command -v make)
+REAL_MKTEMP=$(command -v mktemp)
 cleanup() {
     status=$?
     trap - 0 HUP INT TERM
@@ -55,6 +56,48 @@ EOF_CAPTURE_OK
     chmod +x "$path"
 }
 
+make_fake_failing_sha256sum() {
+    path=$1
+    cat >"$path" <<'EOF_SHA256_FAIL'
+#!/bin/sh
+printf '%s\n' 'intentional sha256sum failure' >&2
+exit 1
+EOF_SHA256_FAIL
+    chmod +x "$path"
+}
+
+make_fake_link_mktemp() {
+    path=$1
+    cat >"$path" <<EOF_MKTEMP_LINK_FAIL
+#!/bin/sh
+set -eu
+if [ "\$1" = -d ]; then
+    template=\$2
+else
+    template=\$1
+fi
+case "\$template" in
+    */.fixtures-link.*) exit 1 ;;
+esac
+exec "$REAL_MKTEMP" "\$@"
+EOF_MKTEMP_LINK_FAIL
+    chmod +x "$path"
+}
+
+make_fake_unsupported_mv() {
+    path=$1
+    cat >"$path" <<'EOF_MV_UNSUPPORTED'
+#!/bin/sh
+set -eu
+if [ "$1" = --help ]; then
+    printf '%s\n' 'mv test double without no-target-directory support'
+    exit 0
+fi
+exec /bin/mv "$@"
+EOF_MV_UNSUPPORTED
+    chmod +x "$path"
+}
+
 make_fake_cross_tools() {
     tool_dir=$1
     mkdir -p "$tool_dir"
@@ -92,6 +135,10 @@ make_fake_final_mv() {
     cat >"$path" <<'EOF_FINAL_MV'
 #!/bin/sh
 set -eu
+if [ "$1" = --help ]; then
+    printf '%s\n' 'Usage: mv -T, --no-target-directory'
+    exit 0
+fi
 source=$1
 destination=$2
 if [ "$source" = -T ]; then
@@ -175,6 +222,57 @@ fi
 [ ! -e "$REAL_DIR_CART/build/.fixtures" ] || \
     fail 'legacy real fixtures rejection left a capture stage behind'
 
+# A stale symlink target must be canonicalized before cleanup.  Lexical
+# .fixtures-* matching must not allow rm -rf to escape build/.
+ESCAPE_CART=$TMP_ROOT/escape-cart
+copy_cart "$ESCAPE_CART"
+mkdir -p "$ESCAPE_CART/build/.fixtures-old" "$ESCAPE_CART/victim"
+printf '%s\n' protected-victim >"$ESCAPE_CART/victim/sentinel"
+ln -s '.fixtures-old/../../victim' "$ESCAPE_CART/build/fixtures"
+if ! make -C "$ESCAPE_CART" host-capture >"$TMP_ROOT/escape-output" 2>"$TMP_ROOT/escape-error"; then
+    cat "$TMP_ROOT/escape-output" "$TMP_ROOT/escape-error" >&2
+    fail 'host-capture rejected a valid prior generation before testing stale cleanup'
+fi
+[ "$(cat "$ESCAPE_CART/victim/sentinel")" = protected-victim ] || \
+    fail 'stale fixture cleanup deleted a victim outside build'
+[ -d "$ESCAPE_CART/build/.fixtures-old" ] || \
+    fail 'stale fixture cleanup did not leave the non-generation escape prefix intact'
+
+# make clean must refuse an override whose canonical path is outside the cart.
+CLEAN_CART=$TMP_ROOT/clean-cart
+copy_cart "$CLEAN_CART"
+CLEAN_VICTIM=$TMP_ROOT/clean-victim
+mkdir -p "$CLEAN_VICTIM"
+printf '%s\n' protected-clean-victim >"$CLEAN_VICTIM/sentinel"
+if make -C "$CLEAN_CART" clean BUILD_DIR="$CLEAN_VICTIM" \
+    >"$TMP_ROOT/clean-output" 2>"$TMP_ROOT/clean-error"; then
+    cat "$TMP_ROOT/clean-output" "$TMP_ROOT/clean-error" >&2
+    fail 'make clean accepted an unsafe BUILD_DIR override'
+fi
+[ "$(cat "$CLEAN_VICTIM/sentinel")" = protected-clean-victim ] || \
+    fail 'make clean deleted an unsafe BUILD_DIR override'
+
+# Cleanup traps must be installed before link allocation so a failed link
+# mktemp removes the already-created capture stage.
+LINK_CART=$TMP_ROOT/link-cart
+copy_cart "$LINK_CART"
+LINK_TOOLS=$TMP_ROOT/link-tools
+mkdir -p "$LINK_TOOLS"
+make_fake_link_mktemp "$LINK_TOOLS/mktemp"
+: >"$TMP_ROOT/link-source"
+touch "$TMP_ROOT/link-capture"
+if PATH="$LINK_TOOLS:$PATH" make -C "$LINK_CART" host-capture \
+    CAPTURE_BIN="$TMP_ROOT/link-capture" CAPTURE_SRC="$TMP_ROOT/link-source" \
+    >"$TMP_ROOT/link-output" 2>"$TMP_ROOT/link-error"; then
+    cat "$TMP_ROOT/link-output" "$TMP_ROOT/link-error" >&2
+    fail 'host-capture accepted a temporary publication-link allocation failure'
+fi
+for leftover in "$LINK_CART/build"/.fixtures.*; do
+    if [ -e "$leftover" ] || [ -L "$leftover" ]; then
+        fail 'link allocation failure left a capture stage behind'
+    fi
+done
+
 # The host binaries and generated wrapper must not be reused after a rebuild
 # request, even when their mtimes make them look newer than their inputs.
 REBUILD_CART=$TMP_ROOT/rebuild-cart
@@ -223,6 +321,29 @@ if ! grep -a -F -q -- 'generated fixture' "$TMP_ROOT/mismatch-output" "$TMP_ROOT
     fail 'make test did not report the generated fixture comparison failure'
 fi
 
+# A sha256sum failure must abort capture before publication and preserve the
+# previous generation; a successful awk in a pipeline must not mask it.
+SHA_CART=$TMP_ROOT/sha-cart
+copy_cart "$SHA_CART"
+mkdir -p "$SHA_CART/build/.fixtures-old"
+printf '%s\n' old-generation >"$SHA_CART/build/.fixtures-old/sentinel"
+ln -s .fixtures-old "$SHA_CART/build/fixtures"
+SHA_TOOLS=$TMP_ROOT/sha-tools
+mkdir -p "$SHA_TOOLS"
+make_fake_failing_sha256sum "$SHA_TOOLS/sha256sum"
+make_fake_capture_without_failures "$TMP_ROOT/sha-capture"
+: >"$TMP_ROOT/sha-source"
+if PATH="$SHA_TOOLS:$PATH" make -C "$SHA_CART" host-capture \
+    CAPTURE_BIN="$TMP_ROOT/sha-capture" CAPTURE_SRC="$TMP_ROOT/sha-source" \
+    >"$TMP_ROOT/sha-output" 2>"$TMP_ROOT/sha-error"; then
+    cat "$TMP_ROOT/sha-output" "$TMP_ROOT/sha-error" >&2
+    fail 'host-capture accepted a sha256sum failure'
+fi
+[ "$(cat "$SHA_CART/build/fixtures/sentinel")" = old-generation ] || \
+    fail 'sha256sum failure discarded the previous fixture generation'
+[ ! -e "$SHA_CART/build/fixtures/scene-0-frame-120.ppm" ] || \
+    fail 'sha256sum failure published a new fixture generation'
+
 # Publication must use a sibling temporary symlink and an atomic final rename.
 grep -F -q "mktemp \"\$(BUILD_DIR)/.fixtures-link.XXXXXX\"" "$CART_DIR/Makefile" || \
     fail 'fixture publication does not allocate a temporary symlink path'
@@ -230,6 +351,38 @@ grep -F -q 'ln -s' "$CART_DIR/Makefile" || \
     fail 'fixture publication does not create a symlink generation'
 grep -F -q 'mv -T' "$CART_DIR/Makefile" || \
     fail 'fixture publication does not replace the symlink itself'
+grep -F -q 'CART_IMMUTABILITY_GUARD' "$CART_DIR/Makefile" || \
+    fail 'fixture immutability recursion lacks an explicit internal guard'
+grep -F -q 'GNU mv with -T is required' "$CART_DIR/Makefile" || \
+    fail 'fixture publication does not document its GNU mv dependency'
+grep -F -q 'GNU coreutils readlink is required' "$CART_DIR/Makefile" || \
+    fail 'fixture publication does not document its GNU readlink dependency'
+
+# An mv without -T support must fail closed with an actionable diagnostic.
+PLATFORM_CART=$TMP_ROOT/platform-cart
+copy_cart "$PLATFORM_CART"
+PLATFORM_TOOLS=$TMP_ROOT/platform-tools
+mkdir -p "$PLATFORM_TOOLS"
+make_fake_unsupported_mv "$PLATFORM_TOOLS/mv"
+make_fake_capture_without_failures "$TMP_ROOT/platform-capture"
+: >"$TMP_ROOT/platform-source"
+if PATH="$PLATFORM_TOOLS:$PATH" make -C "$PLATFORM_CART" host-capture \
+    CAPTURE_BIN="$TMP_ROOT/platform-capture" CAPTURE_SRC="$TMP_ROOT/platform-source" \
+    >"$TMP_ROOT/platform-output" 2>"$TMP_ROOT/platform-error"; then
+    cat "$TMP_ROOT/platform-output" "$TMP_ROOT/platform-error" >&2
+    fail 'host-capture accepted an mv implementation without -T support'
+fi
+if ! grep -a -F -q -- 'GNU mv with -T is required' \
+    "$TMP_ROOT/platform-output" "$TMP_ROOT/platform-error"; then
+    cat "$TMP_ROOT/platform-output" "$TMP_ROOT/platform-error" >&2
+    fail 'mv dependency failure lacked its actionable diagnostic'
+fi
+for leftover in "$PLATFORM_CART/build"/.fixtures.*; do
+    if [ -e "$leftover" ] || [ -L "$leftover" ]; then
+        fail 'mv dependency failure left a capture stage behind'
+    fi
+done
+
 grep -F -q 'CART_IMMUTABILITY_GUARD' "$CART_DIR/Makefile" || \
     fail 'fixture immutability recursion lacks an explicit internal guard'
 

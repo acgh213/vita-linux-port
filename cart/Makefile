@@ -47,29 +47,46 @@ host-capture: $(CAPTURE_BIN)
 		printf '%s\n' 'FAIL build/fixtures must be a symlink; remove the legacy real directory before capturing' >&2; \
 		exit 1; \
 	fi; \
-	stage=$$(mktemp -d "$(BUILD_DIR)/.fixtures.XXXXXX"); \
-	stage=$$(CDPATH='' cd -- "$$stage" && pwd -P); \
-	link=$$(mktemp "$(BUILD_DIR)/.fixtures-link.XXXXXX"); \
-	rm -f "$$link"; \
+	command -v sha256sum >/dev/null 2>&1 || { printf '%s\n' 'FAIL host-capture: GNU sha256sum is required' >&2; exit 1; }; \
+	if ! readlink_version=$$(readlink --version 2>&1); then \
+		printf '%s\n' 'FAIL host-capture: GNU coreutils readlink is required' >&2; \
+		exit 1; \
+	fi; \
+	case "$$readlink_version" in \
+		*'GNU coreutils'*) ;; \
+		*) printf '%s\n' 'FAIL host-capture: GNU coreutils readlink is required' >&2; exit 1 ;; \
+	esac; \
+	command -v mv >/dev/null 2>&1 || { printf '%s\n' 'FAIL host-capture: GNU mv with -T is required for atomic symlink publication' >&2; exit 1; }; \
+	if ! mv --help 2>&1 | grep -q -- '-T'; then \
+		printf '%s\n' 'FAIL host-capture: GNU mv with -T is required for atomic symlink publication' >&2; \
+		exit 1; \
+	fi; \
+	stage=; \
+	link=; \
 	published=0; \
 	old=; \
-	build_real=$$(CDPATH='' cd -- "$(BUILD_DIR)" && pwd -P); \
-	if [ -L "$(GENERATED_FIXTURES)" ]; then old=$$(readlink "$(GENERATED_FIXTURES)"); fi; \
+	build_real=; \
 	cleanup() { \
 		status=$$?; \
 		trap - 0 HUP INT TERM; \
-		rm -f "$$link" || status=1; \
-		if [ "$$published" -eq 0 ]; then \
-			rm -rf "$$stage" || status=1; \
+		if [ -n "$$link" ]; then rm -f -- "$$link" || status=1; fi; \
+		if [ "$$published" -eq 0 ] && [ -n "$$stage" ]; then \
+			rm -rf -- "$$stage" || status=1; \
 		fi; \
 		if [ "$$published" -eq 1 ] && [ -n "$$old" ]; then \
 			case "$$old" in \
 				/*) old_path=$$old ;; \
 				*) old_path="$$build_real/$${old#./}" ;; \
-			esac; \
-			case "$$old_path/" in \
-				"$$build_real"/.fixtures-*/*|"$$build_real"/.fixtures.*/*) rm -rf "$$old_path" || status=1 ;; \
-			esac; \
+			 esac; \
+			if old_real=$$(CDPATH='' cd -- "$$old_path" && pwd -P); then \
+				old_parent=$$(CDPATH='' cd -- "$$(dirname -- "$$old_real")" && pwd -P) || old_parent=; \
+				old_base=$$(basename -- "$$old_real"); \
+				if [ "$$old_parent" = "$$build_real" ]; then \
+					case "$$old_base" in \
+						.fixtures.*) rm -rf -- "$$old_real" || status=1 ;; \
+					esac; \
+				fi; \
+			fi; \
 		fi; \
 		exit "$$status"; \
 	}; \
@@ -77,13 +94,27 @@ host-capture: $(CAPTURE_BIN)
 	trap 'exit 129' HUP; \
 	trap 'exit 130' INT; \
 	trap 'exit 143' TERM; \
+	stage=$$(mktemp -d "$(BUILD_DIR)/.fixtures.XXXXXX"); \
+	stage=$$(CDPATH='' cd -- "$$stage" && pwd -P); \
+	link=$$(mktemp "$(BUILD_DIR)/.fixtures-link.XXXXXX"); \
+	rm -f -- "$$link"; \
+	build_real=$$(CDPATH='' cd -- "$(BUILD_DIR)" && pwd -P); \
+	if [ -L "$(GENERATED_FIXTURES)" ]; then old=$$(readlink "$(GENERATED_FIXTURES)"); fi; \
 	for scene in 0 1 2 3 4 5; do \
 		"$(CAPTURE_BIN)" "$$scene" 120 "$$stage/scene-$$scene-frame-120.ppm"; \
 	done; \
 	{ \
 		printf '%s\n' 'manifest_version=1' 'logical_width=320' 'logical_height=180' 'capture_width=320' 'capture_height=180' 'scene_count=6' 'frame=120'; \
 		for scene in 0 1 2 3 4 5; do \
-			printf 'scene_%s_sha256=%s\n' "$$scene" "$$(sha256sum "$$stage/scene-$$scene-frame-120.ppm" | awk '{print $$1}')"; \
+			if ! checksum_output=$$(sha256sum "$$stage/scene-$$scene-frame-120.ppm"); then \
+				printf 'FAIL host-capture: sha256sum failed for scene %s\n' "$$scene" >&2; \
+				exit 1; \
+			fi; \
+			checksum=$${checksum_output%% *}; \
+			case "$$checksum" in \
+				''|*[!0123456789abcdefABCDEF]*) printf 'FAIL host-capture: invalid sha256sum output for scene %s\n' "$$scene" >&2; exit 1 ;; \
+			 esac; \
+			printf 'scene_%s_sha256=%s\n' "$$scene" "$$checksum"; \
 		done; \
 	} > "$$stage/manifest.txt.tmp"; \
 	mv "$$stage/manifest.txt.tmp" "$$stage/manifest.txt"; \
@@ -123,4 +154,20 @@ test: host-sanitize host-capture
 	$(MAKE) cross-verify
 
 clean:
-	rm -rf "$(BUILD_DIR)"
+	@set -eu; \
+	cart_real=$$(CDPATH='' cd -- "$(CART_DIR)" && pwd -P) || { printf '%s\n' 'FAIL clean: cannot canonicalize cart directory' >&2; exit 1; }; \
+	build_input="$(BUILD_DIR)"; \
+	if [ -d "$$build_input" ]; then \
+		build_real=$$(CDPATH='' cd -- "$$build_input" && pwd -P) || { printf '%s\n' 'FAIL clean: cannot canonicalize BUILD_DIR' >&2; exit 1; }; \
+	else \
+		build_parent=$$(CDPATH='' cd -- "$$(dirname -- "$$build_input")" && pwd -P) || { printf '%s\n' 'FAIL clean: cannot canonicalize BUILD_DIR parent' >&2; exit 1; }; \
+		build_base=$$(basename -- "$$build_input"); \
+		[ -n "$$build_base" ] || { printf '%s\n' 'FAIL clean: BUILD_DIR must name a directory below the cart' >&2; exit 1; }; \
+		build_real="$$build_parent/$$build_base"; \
+	fi; \
+	case "$$build_real/" in \
+		"$$cart_real"/*) ;; \
+		*) printf '%s\n' 'FAIL clean: BUILD_DIR must resolve below the cart directory' >&2; exit 1 ;; \
+	esac; \
+	[ "$$build_real" != "$$cart_real" ] || { printf '%s\n' 'FAIL clean: BUILD_DIR must not resolve to the cart directory' >&2; exit 1; }; \
+	rm -rf -- "$$build_input"
