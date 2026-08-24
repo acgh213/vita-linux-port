@@ -32,8 +32,9 @@ fail() {
 }
 
 usage() {
-    printf '%s\n' 'Usage: verify-baseline.sh [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction] [--allow-nonproduction]' >&2
-    exit 2
+    status=${1:-2}
+    printf '%s\n' 'Usage: verify-baseline.sh [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction] [--allow-nonproduction]'
+    exit "$status"
 }
 
 # --expected is an isolated-fixture hook; it is rejected without the explicit
@@ -60,7 +61,7 @@ while [ "$#" -gt 0 ]; do
             shift
             ;;
         --help|-h)
-            usage
+            usage 0
             ;;
         *)
             usage
@@ -247,13 +248,18 @@ check_submodule() {
     path=$2
     expected_commit=$3
     [ -d "$repo/$path" ] || fail "submodule.${name}_initialized"
+    [ ! -L "$repo/$path" ] || fail "submodule.${name}_initialized"
+    if ! path_real=$(CDPATH='' cd -- "$repo/$path" && pwd -P); then
+        fail "submodule.${name}_git_command"
+    fi
+    case "$path_real/" in
+        "$outer_root_real/"*) ;;
+        *) fail "submodule.${name}_initialized" ;;
+    esac
     if ! sub_root=$(git -C "$repo/$path" rev-parse --show-toplevel 2>/dev/null); then
         fail "submodule.${name}_initialized"
     fi
     if ! sub_root_real=$(CDPATH='' cd -- "$sub_root" && pwd -P); then
-        fail "submodule.${name}_git_command"
-    fi
-    if ! path_real=$(CDPATH='' cd -- "$repo/$path" && pwd -P); then
         fail "submodule.${name}_git_command"
     fi
     [ "$sub_root_real" = "$path_real" ] || fail "submodule.${name}_initialized"

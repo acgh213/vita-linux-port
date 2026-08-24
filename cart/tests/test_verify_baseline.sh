@@ -4,7 +4,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 VERIFIER=$SCRIPT_DIR/../scripts/verify-baseline.sh
-TMP_ROOT=${TMPDIR:-/tmp}/cart-verify-baseline.$$
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cart-verify-baseline.XXXXXX") || exit 1
 
 cleanup() {
     rm -rf "$TMP_ROOT"
@@ -149,6 +149,12 @@ rm -rf "$OUTER/linux_vita"
 run_fail 'missing submodule directory' 'FAIL submodule.kernel_initialized' \
     "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
 
+make_fixture symlink-escape
+rm -rf "$OUTER/linux_vita"
+ln -s "$KERNEL" "$OUTER/linux_vita"
+run_fail 'symlinked submodule escapes outer worktree' 'FAIL submodule.kernel_initialized' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
+
 make_fixture dirty-submodule
 printf 'dirty\n' >"$OUTER/linux_vita/untracked-file"
 run_fail 'dirty submodule' 'FAIL submodule.kernel_clean' \
@@ -163,5 +169,21 @@ printf 'target_fps=30.04\n' >>"$MALFORMED"
 printf 'target_fps=30.04\n' >>"$MALFORMED"
 run_fail 'duplicate baseline key' 'FAIL baseline.syntax' \
     "$VERIFIER" --repo "$OUTER" --baseline "$MALFORMED" --expected "$EXPECTED" --allow-nonproduction
+
+make_fixture unknown-key
+printf 'unknown_key=value\n' >>"$BASELINE"
+run_fail 'unknown baseline key' 'FAIL baseline.syntax' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
+
+make_fixture malformed-assignment
+printf 'target_fps=30.04 extra\n' >>"$BASELINE"
+run_fail 'malformed baseline assignment' 'FAIL baseline.syntax' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
+
+make_fixture malformed-value
+awk -F= '{ if ($1 == "target_fps") print "target_fps=thirty"; else print }' "$BASELINE" >"$BASELINE.tmp"
+mv "$BASELINE.tmp" "$BASELINE"
+run_fail 'malformed baseline value' 'FAIL baseline.target_fps' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
 
 printf 'all verifier fixture tests passed\n'
