@@ -6,7 +6,16 @@ SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 CART_DIR=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd -P)
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cart-make-harness.XXXXXX") || exit 1
 REAL_MAKE=$(command -v make)
-trap 'rm -rf "$TMP_ROOT"' EXIT HUP INT TERM
+cleanup() {
+    status=$?
+    trap - 0 HUP INT TERM
+    rm -rf "$TMP_ROOT"
+    exit "$status"
+}
+trap cleanup 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 fail() {
     printf 'not ok - %s\n' "$1" >&2
@@ -32,6 +41,17 @@ if [ "$scene" -eq 3 ]; then
 fi
 printf 'P6\n320 180\n255\n' >"$output"
 EOF_CAPTURE
+    chmod +x "$path"
+}
+
+make_fake_capture_without_failures() {
+    path=$1
+    cat >"$path" <<'EOF_CAPTURE_OK'
+#!/bin/sh
+set -eu
+output=$3
+printf 'P6\n320 180\n255\n' >"$output"
+EOF_CAPTURE_OK
     chmod +x "$path"
 }
 
@@ -114,6 +134,71 @@ fi
     fail 'failed host-capture discarded the previous fixture generation'
 [ ! -f "$ATOMIC_CART/build/fixtures/scene-0-frame-120.ppm" ] || \
     fail 'failed host-capture published a partial fixture generation'
+
+# The host binaries and generated wrapper must not be reused after a rebuild
+# request, even when their mtimes make them look newer than their inputs.
+REBUILD_CART=$TMP_ROOT/rebuild-cart
+copy_cart "$REBUILD_CART"
+REBUILD_TOOLS=$TMP_ROOT/rebuild-tools
+mkdir -p "$REBUILD_TOOLS"
+cat >"$REBUILD_TOOLS/cc" <<'EOF_CC'
+#!/bin/sh
+set -eu
+printf '%s\n' compile >>"$CC_LOG"
+exec cc "$@"
+EOF_CC
+chmod +x "$REBUILD_TOOLS/cc"
+CC_LOG=$TMP_ROOT/cc.log
+: >"$CC_LOG"
+CC="$REBUILD_TOOLS/cc" CC_LOG="$CC_LOG" make -C "$REBUILD_CART" host-sanitize >/dev/null
+CC="$REBUILD_TOOLS/cc" CC_LOG="$CC_LOG" make -C "$REBUILD_CART" host-sanitize >/dev/null
+[ "$(wc -l <"$CC_LOG")" -ge 2 ] || \
+    fail 'host-sanitize reused a stale compiler output'
+grep -F -q "\$(HOST_BIN): \$(SRC) FORCE" "$CART_DIR/Makefile" || \
+    fail 'host-sanitize lacks a deterministic rebuild dependency'
+grep -F -q "\$(CAPTURE_SRC): \$(SRC) FORCE" "$CART_DIR/Makefile" || \
+    fail 'generated capture wrapper lacks a deterministic rebuild dependency'
+grep -F -q "\$(CAPTURE_BIN): \$(CAPTURE_SRC) FORCE" "$CART_DIR/Makefile" || \
+    fail 'host capture binary lacks a deterministic rebuild dependency'
+
+# The normal test path must compare every generated PPM and the generated
+# manifest against the committed authoritative fixtures.
+FAKE_TOOLS=$TMP_ROOT/fake-tools
+make_fake_cross_tools "$FAKE_TOOLS"
+MISMATCH_CART=$TMP_ROOT/mismatch-cart
+copy_cart "$MISMATCH_CART"
+make_fake_capture_without_failures "$TMP_ROOT/mismatch-capture"
+: >"$TMP_ROOT/mismatch-source"
+touch "$TMP_ROOT/mismatch-capture"
+if CART_SKIP_IMMUTABILITY=1 make -C "$MISMATCH_CART" test \
+    CAPTURE_BIN="$TMP_ROOT/mismatch-capture" \
+    CAPTURE_SRC="$TMP_ROOT/mismatch-source" \
+    PATH="$FAKE_TOOLS:$PATH" CROSS_CC="$FAKE_TOOLS/cross-cc" \
+    >"$TMP_ROOT/mismatch-output" 2>"$TMP_ROOT/mismatch-error"; then
+    cat "$TMP_ROOT/mismatch-output" "$TMP_ROOT/mismatch-error" >&2
+    fail 'make test accepted generated fixtures that differ from committed fixtures'
+fi
+if ! grep -a -F -q -- 'generated fixture' "$TMP_ROOT/mismatch-output" "$TMP_ROOT/mismatch-error"; then
+    cat "$TMP_ROOT/mismatch-output" "$TMP_ROOT/mismatch-error" >&2
+    fail 'make test did not report the generated fixture comparison failure'
+fi
+
+# Publication backups must use a unique mktemp-created path rather than a PID
+# suffix that can collide with a pre-existing directory.
+grep -F -q "mktemp -d \"\$(BUILD_DIR)/.fixtures-old.XXXXXX\"" "$CART_DIR/Makefile" || \
+    fail 'fixture publication backup is not mktemp-created'
+if grep -F -q 'GENERATED_FIXTURES).old.$$' "$CART_DIR/Makefile"; then
+    fail 'fixture publication backup still uses a collidable PID suffix'
+fi
+
+# Shell traps must use POSIX trap 0 and exit through the cleanup handler on
+# signals; EXIT is not portable and signal traps must not continue execution.
+if grep -E -q 'trap .*EXIT HUP' "$CART_DIR/tests/test_fixture_immutability.sh"; then
+    fail "$CART_DIR/tests/test_fixture_immutability.sh uses non-portable EXIT trap"
+fi
+if grep -E -q 'trap cleanup 0 HUP INT TERM' "$CART_DIR/Makefile"; then
+    fail 'Makefile signal traps do not terminate after cleanup'
+fi
 
 # make test must execute the sanitizer-backed capture, not only compile it.
 TEST_CART=$TMP_ROOT/test-cart

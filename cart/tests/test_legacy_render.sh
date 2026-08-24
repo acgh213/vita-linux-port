@@ -7,11 +7,17 @@ CART_DIR=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd -P)
 FIXTURES=$CART_DIR/tests/fixtures
 MANIFEST=$FIXTURES/manifest.txt
 VERIFY_ONLY=0
+COMPARE_TO=
 
 while [ "$#" -gt 0 ]; do
     case $1 in
         --verify-only) VERIFY_ONLY=1; shift ;;
-        *) printf 'usage: %s [--verify-only]\n' "$0" >&2; exit 2 ;;
+        --compare-to)
+            [ "$#" -ge 2 ] || { printf 'usage: %s [--verify-only] [--compare-to DIR]\n' "$0" >&2; exit 2; }
+            COMPARE_TO=$2
+            shift 2
+            ;;
+        *) printf 'usage: %s [--verify-only] [--compare-to DIR]\n' "$0" >&2; exit 2 ;;
     esac
 done
 
@@ -76,6 +82,21 @@ done
 
 unique=$(printf '%s\n' "$hashes" | awk 'NF { print }' | sort -u | awk 'END { print NR }')
 [ "$unique" -eq 6 ] || fail "expected six distinct scene hashes, got $unique"
+
+if [ -n "$COMPARE_TO" ]; then
+    [ -d "$COMPARE_TO" ] || fail "generated fixture directory missing: $COMPARE_TO"
+    scene=0
+    while [ "$scene" -lt 6 ]; do
+        generated=$COMPARE_TO/scene-$scene-frame-120.ppm
+        [ -f "$generated" ] || fail "generated fixture missing: $generated"
+        cmp -s "$FIXTURES/scene-$scene-frame-120.ppm" "$generated" || \
+            fail "generated fixture $generated differs from committed fixture"
+        scene=$((scene + 1))
+    done
+    cmp -s "$MANIFEST" "$COMPARE_TO/manifest.txt" || \
+        fail 'generated fixture manifest differs from committed manifest'
+    printf 'PASS generated six PPMs and manifest match committed fixtures\n'
+fi
 
 printf 'PASS imported source hashes\n'
 printf 'PASS six deterministic 320x180 PPM fixtures (frame 120)\n'

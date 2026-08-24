@@ -7,9 +7,15 @@ CART_DIR=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd -P)
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cart-fixture-immutability.XXXXXX") || exit 1
 
 cleanup() {
+    status=$?
+    trap - 0 HUP INT TERM
     rm -rf "$TMP_ROOT"
+    exit "$status"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 fail() {
     printf 'not ok - %s\n' "$1" >&2
