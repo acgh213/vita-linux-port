@@ -207,6 +207,7 @@ verify-dtb: ## verify all Vita DTBs were built
 
 test: ## run build-contract regression tests
 	@MAKE_CMD="$(MAKE)" ./tests/test-dtb-build.sh
+	@MAKE_CMD="$(MAKE)" ./tests/test-worktree.sh
 
 # ------- LSP / clangd -------
 
@@ -408,15 +409,16 @@ worktree: ## create outer worktree at ../vita-wt/<NAME>
 	ln -sfn "$$MAIN_DIR/refs" "$$DEST/refs"; \
 	if [ "$(INIT_SUBMODULES)" = "1" ]; then \
 		echo "Initializing submodules (integration worktree)..."; \
-		git -C "$$DEST" submodule update --init --reference-if-able "$(CACHE_DIR)"; \
+		if ! git -C "$$DEST" submodule update --init; then \
+			echo "ERROR: Submodule initialization failed; integration worktree is incomplete."; \
+			rmdir "$$DEST/linux_vita" 2>/dev/null || true; \
+			exit 1; \
+		fi; \
 		if [ "$(UNAME_S)" = "Darwin" ]; then \
 			./fix_case_sensitivity.sh "$$DEST/linux_vita"; \
 		fi; \
-		if [ -f "linux_vita/rootfs.cpio.zst" ]; then \
-			cp "linux_vita/rootfs.cpio.zst" "$$DEST/linux_vita/rootfs.cpio.zst"; \
-		else \
-			echo "  NOTE: rootfs.cpio.zst not found in linux_vita/ — run 'make rootfs' to build it"; \
-		fi; \
+		echo "  NOTE: rootfs.cpio.zst is a local convenience artifact and is not copied."; \
+		echo "        Run 'make rootfs' in the integration worktree to build it."; \
 		echo ""; \
 		echo "Integration worktree ready at $$DEST"; \
 		echo "  Run 'make config && make build' to build."; \
