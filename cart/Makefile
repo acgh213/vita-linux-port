@@ -94,12 +94,32 @@ host-capture: $(CAPTURE_BIN)
 	trap 'exit 129' HUP; \
 	trap 'exit 130' INT; \
 	trap 'exit 143' TERM; \
+	build_real=$$(CDPATH='' cd -- "$(BUILD_DIR)" && pwd -P) || { printf '%s\n' 'FAIL host-capture: cannot canonicalize BUILD_DIR' >&2; exit 1; }; \
+	if [ -L "$(GENERATED_FIXTURES)" ]; then \
+		old=$$(readlink "$(GENERATED_FIXTURES)"); \
+		case "$$old" in \
+			/*) old_path=$$old ;; \
+			*) old_path="$$build_real/$${old#./}" ;; \
+		esac; \
+		if ! old_real=$$(CDPATH='' cd -- "$$old_path" && pwd -P); then \
+			printf '%s\n' 'FAIL host-capture: existing build/fixtures symlink target must resolve directly below build as .fixtures.*' >&2; \
+			exit 1; \
+		fi; \
+		old_parent=$$(CDPATH='' cd -- "$$(dirname -- "$$old_real")" && pwd -P) || { printf '%s\n' 'FAIL host-capture: existing build/fixtures symlink target must resolve directly below build as .fixtures.*' >&2; exit 1; }; \
+		old_base=$$(basename -- "$$old_real"); \
+		if [ "$$old_parent" != "$$build_real" ]; then \
+			printf '%s\n' 'FAIL host-capture: existing build/fixtures symlink target must resolve directly below build as .fixtures.*' >&2; \
+			exit 1; \
+		fi; \
+		case "$$old_base" in \
+			.fixtures.*|.fixtures-*) ;; \
+			*) printf '%s\n' 'FAIL host-capture: existing build/fixtures symlink target must resolve directly below build as .fixtures.*' >&2; exit 1 ;; \
+		esac; \
+	fi; \
 	stage=$$(mktemp -d "$(BUILD_DIR)/.fixtures.XXXXXX"); \
 	stage=$$(CDPATH='' cd -- "$$stage" && pwd -P); \
 	link=$$(mktemp "$(BUILD_DIR)/.fixtures-link.XXXXXX"); \
 	rm -f -- "$$link"; \
-	build_real=$$(CDPATH='' cd -- "$(BUILD_DIR)" && pwd -P); \
-	if [ -L "$(GENERATED_FIXTURES)" ]; then old=$$(readlink "$(GENERATED_FIXTURES)"); fi; \
 	for scene in 0 1 2 3 4 5; do \
 		"$(CAPTURE_BIN)" "$$scene" 120 "$$stage/scene-$$scene-frame-120.ppm"; \
 	done; \
@@ -114,6 +134,10 @@ host-capture: $(CAPTURE_BIN)
 			case "$$checksum" in \
 				''|*[!0123456789abcdefABCDEF]*) printf 'FAIL host-capture: invalid sha256sum output for scene %s\n' "$$scene" >&2; exit 1 ;; \
 			 esac; \
+			if [ "$${#checksum}" -ne 64 ]; then \
+				printf 'FAIL host-capture: invalid sha256sum output for scene %s\n' "$$scene" >&2; \
+				exit 1; \
+			fi; \
 			printf 'scene_%s_sha256=%s\n' "$$scene" "$$checksum"; \
 		done; \
 	} > "$$stage/manifest.txt.tmp"; \

@@ -66,6 +66,15 @@ EOF_SHA256_FAIL
     chmod +x "$path"
 }
 
+make_fake_invalid_sha256sum() {
+    path=$1
+    cat >"$path" <<'EOF_SHA256_INVALID'
+#!/bin/sh
+printf '%s\n' 'abc  invalid-input'
+EOF_SHA256_INVALID
+    chmod +x "$path"
+}
+
 make_fake_link_mktemp() {
     path=$1
     cat >"$path" <<EOF_MKTEMP_LINK_FAIL
@@ -222,21 +231,33 @@ fi
 [ ! -e "$REAL_DIR_CART/build/.fixtures" ] || \
     fail 'legacy real fixtures rejection left a capture stage behind'
 
-# A stale symlink target must be canonicalized before cleanup.  Lexical
-# .fixtures-* matching must not allow rm -rf to escape build/.
+# An existing fixture symlink whose canonical target escapes build/ must be
+# rejected before capture.  Preserve both the symlink and the outside target.
 ESCAPE_CART=$TMP_ROOT/escape-cart
 copy_cart "$ESCAPE_CART"
 mkdir -p "$ESCAPE_CART/build/.fixtures-old" "$ESCAPE_CART/victim"
 printf '%s\n' protected-victim >"$ESCAPE_CART/victim/sentinel"
 ln -s '.fixtures-old/../../victim' "$ESCAPE_CART/build/fixtures"
-if ! make -C "$ESCAPE_CART" host-capture >"$TMP_ROOT/escape-output" 2>"$TMP_ROOT/escape-error"; then
+if make -C "$ESCAPE_CART" host-capture >"$TMP_ROOT/escape-output" 2>"$TMP_ROOT/escape-error"; then
     cat "$TMP_ROOT/escape-output" "$TMP_ROOT/escape-error" >&2
-    fail 'host-capture rejected a valid prior generation before testing stale cleanup'
+    fail 'host-capture accepted an existing fixture symlink outside build'
 fi
+if ! grep -a -F -q -- 'existing build/fixtures symlink target must resolve directly below build as .fixtures.*' \
+    "$TMP_ROOT/escape-output" "$TMP_ROOT/escape-error"; then
+    cat "$TMP_ROOT/escape-output" "$TMP_ROOT/escape-error" >&2
+    fail 'unsafe existing fixture symlink failure lacked its explicit diagnostic'
+fi
+[ "$(readlink "$ESCAPE_CART/build/fixtures")" = '.fixtures-old/../../victim' ] || \
+    fail 'unsafe existing fixture symlink was changed before rejection'
 [ "$(cat "$ESCAPE_CART/victim/sentinel")" = protected-victim ] || \
-    fail 'stale fixture cleanup deleted a victim outside build'
+    fail 'unsafe existing fixture rejection changed the outside victim'
 [ -d "$ESCAPE_CART/build/.fixtures-old" ] || \
-    fail 'stale fixture cleanup did not leave the non-generation escape prefix intact'
+    fail 'unsafe existing fixture rejection removed the old generation prefix'
+for leftover in "$ESCAPE_CART/build"/.fixtures.?????? "$ESCAPE_CART/build"/.fixtures-link.??????; do
+    if [ -e "$leftover" ] || [ -L "$leftover" ]; then
+        fail 'unsafe existing fixture rejection left a capture stage behind'
+    fi
+done
 
 # make clean must refuse an override whose canonical path is outside the cart.
 CLEAN_CART=$TMP_ROOT/clean-cart
@@ -343,6 +364,32 @@ fi
     fail 'sha256sum failure discarded the previous fixture generation'
 [ ! -e "$SHA_CART/build/fixtures/scene-0-frame-120.ppm" ] || \
     fail 'sha256sum failure published a new fixture generation'
+
+# A sha256sum result with fewer than 64 hexadecimal characters must also abort
+# before publication and preserve the previous generation.
+INVALID_SHA_CART=$TMP_ROOT/invalid-sha-cart
+copy_cart "$INVALID_SHA_CART"
+mkdir -p "$INVALID_SHA_CART/build/.fixtures-old"
+printf '%s\n' old-generation >"$INVALID_SHA_CART/build/.fixtures-old/sentinel"
+ln -s .fixtures-old "$INVALID_SHA_CART/build/fixtures"
+INVALID_SHA_TOOLS=$TMP_ROOT/invalid-sha-tools
+mkdir -p "$INVALID_SHA_TOOLS"
+make_fake_invalid_sha256sum "$INVALID_SHA_TOOLS/sha256sum"
+if PATH="$INVALID_SHA_TOOLS:$PATH" make -C "$INVALID_SHA_CART" host-capture \
+    CAPTURE_BIN="$TMP_ROOT/sha-capture" CAPTURE_SRC="$TMP_ROOT/sha-source" \
+    >"$TMP_ROOT/invalid-sha-output" 2>"$TMP_ROOT/invalid-sha-error"; then
+    cat "$TMP_ROOT/invalid-sha-output" "$TMP_ROOT/invalid-sha-error" >&2
+    fail 'host-capture accepted an invalid sha256sum value'
+fi
+if ! grep -a -F -q -- 'invalid sha256sum output for scene 0' \
+    "$TMP_ROOT/invalid-sha-output" "$TMP_ROOT/invalid-sha-error"; then
+    cat "$TMP_ROOT/invalid-sha-output" "$TMP_ROOT/invalid-sha-error" >&2
+    fail 'invalid sha256sum failure lacked its explicit diagnostic'
+fi
+[ "$(cat "$INVALID_SHA_CART/build/fixtures/sentinel")" = old-generation ] || \
+    fail 'invalid sha256sum output discarded the previous fixture generation'
+[ ! -e "$INVALID_SHA_CART/build/fixtures/scene-0-frame-120.ppm" ] || \
+    fail 'invalid sha256sum output published a new fixture generation'
 
 # Publication must use a sibling temporary symlink and an atomic final rename.
 grep -F -q "mktemp \"\$(BUILD_DIR)/.fixtures-link.XXXXXX\"" "$CART_DIR/Makefile" || \
