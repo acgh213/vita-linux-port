@@ -67,6 +67,21 @@ EOF_READELF
     chmod +x "$tool_dir/cross-cc" "$tool_dir/file" "$tool_dir/readelf"
 }
 
+make_fake_final_mv() {
+    path=$1
+    cat >"$path" <<'EOF_FINAL_MV'
+#!/bin/sh
+set -eu
+source=$1
+destination=$2
+case "$source:$destination" in
+    */.fixtures.*:*/fixtures) exit 1 ;;
+esac
+exec /bin/mv "$source" "$destination"
+EOF_FINAL_MV
+    chmod +x "$path"
+}
+
 # A fixture rejection must not be inferred from an unrelated child make failure.
 FAKE_MAKE_DIR=$TMP_ROOT/fake-make
 mkdir -p "$FAKE_MAKE_DIR"
@@ -119,6 +134,38 @@ while [ "$scene" -lt 6 ]; do
         fail "make test did not capture scene $scene"
     scene=$((scene + 1))
 done
+
+# Generated captures must have real PPM header newlines and match the
+# authoritative scene-0 fixture byte-for-byte.
+SCENE_0="$TEST_CART/build/fixtures/scene-0-frame-120.ppm"
+header=$(od -An -v -t x1 -N 15 "$SCENE_0" | tr -d ' \n')
+[ "$header" = 50360a333230203138300a3235350a ] || \
+    fail "generated scene-0 PPM header bytes ($header)"
+expected_hash=$(sha256sum "$TEST_CART/tests/fixtures/scene-0-frame-120.ppm" | awk '{print $1}')
+actual_hash=$(sha256sum "$SCENE_0" | awk '{print $1}')
+[ "$actual_hash" = "$expected_hash" ] || \
+    fail "generated scene-0 PPM hash ($actual_hash != $expected_hash)"
+cmp -s "$TEST_CART/tests/fixtures/scene-0-frame-120.ppm" "$SCENE_0" || \
+    fail 'generated scene-0 PPM differs from the authoritative fixture'
+
+# A failed final publication rename must return nonzero and preserve the old
+# generation instead of being reported as a successful capture.
+RENAME_CART=$TMP_ROOT/rename-cart
+copy_cart "$RENAME_CART"
+mkdir -p "$RENAME_CART/build/fixtures"
+printf '%s\n' old-generation >"$RENAME_CART/build/fixtures/sentinel"
+RENAME_TOOLS=$TMP_ROOT/rename-tools
+mkdir -p "$RENAME_TOOLS"
+make_fake_final_mv "$RENAME_TOOLS/mv"
+if PATH="$RENAME_TOOLS:$PATH" make -C "$RENAME_CART" host-capture \
+    >"$TMP_ROOT/rename-output" 2>"$TMP_ROOT/rename-error"; then
+    cat "$TMP_ROOT/rename-output" "$TMP_ROOT/rename-error" >&2
+    fail 'host-capture reported success after final publication rename failed'
+fi
+[ "$(cat "$RENAME_CART/build/fixtures/sentinel")" = old-generation ] || \
+    fail 'final publication rename failure did not preserve the old fixture generation'
+[ ! -e "$RENAME_CART/build/fixtures/scene-0-frame-120.ppm" ] || \
+    fail 'final publication rename failure published a new fixture generation'
 
 # Host targets must work when the checkout path contains spaces.
 SPACE_CART=$TMP_ROOT/cart\ with\ space

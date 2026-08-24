@@ -30,7 +30,7 @@ $(HOST_BIN): $(SRC)
 
 $(CAPTURE_SRC): $(SRC)
 	@mkdir -p "$(BUILD_DIR)"
-	@printf '%s\n' '#define main pstv_demo_cart_production_main' '#include "../src/pstv-demo-cart.c"' '#undef main' '#include <stdint.h>' '#include <stdio.h>' '#include <stdlib.h>' '' 'static int dump_logical(const char *path)' '{' '    FILE *f = fopen(path, "wb");' '    if (!f) { perror(path); return 1; }' '    if (fprintf(f, "P6\\n%d %d\\n255\\n", LW, LH) < 0) { fclose(f); return 1; }' '    for (int y = 0; y < LH; y++)' '        for (int x = 0; x < LW; x++) {' '            uint32_t c = low[y * LW + x];' '            uint8_t p[3] = { c & 255, (c >> 8) & 255, (c >> 16) & 255 };' '            if (fwrite(p, 1, sizeof(p), f) != sizeof(p)) { fclose(f); return 1; }' '        }' '    return fclose(f) != 0;' '}' 'int main(int argc, char **argv)' '{' '    if (argc != 4) { fprintf(stderr, "usage: %s SCENE FRAME OUTPUT\\n", argv[0]); return 2; }' '    for (int i = 0; i < 2048; i++) sins[i] = sinf((float)i * 6.28318530718f / 2048.0f);' '    render_frame(atoi(argv[1]) % SCENES, atoi(argv[2]));' '    return dump_logical(argv[3]);' '}' > "$@"
+	@printf '%s\n' '#define main pstv_demo_cart_production_main' '#include "../src/pstv-demo-cart.c"' '#undef main' '#include <stdint.h>' '#include <stdio.h>' '#include <stdlib.h>' '' 'static int dump_logical(const char *path)' '{' '    FILE *f = fopen(path, "wb");' '    if (!f) { perror(path); return 1; }' '    if (fprintf(f, "P6\n%d %d\n255\n", LW, LH) < 0) { fclose(f); return 1; }' '    for (int y = 0; y < LH; y++)' '        for (int x = 0; x < LW; x++) {' '            uint32_t c = low[y * LW + x];' '            uint8_t p[3] = { c & 255, (c >> 8) & 255, (c >> 16) & 255 };' '            if (fwrite(p, 1, sizeof(p), f) != sizeof(p)) { fclose(f); return 1; }' '        }' '    return fclose(f) != 0;' '}' 'int main(int argc, char **argv)' '{' '    if (argc != 4) { fprintf(stderr, "usage: %s SCENE FRAME OUTPUT\n", argv[0]); return 2; }' '    for (int i = 0; i < 2048; i++) sins[i] = sinf((float)i * 6.28318530718f / 2048.0f);' '    render_frame(atoi(argv[1]) % SCENES, atoi(argv[2]));' '    return dump_logical(argv[3]);' '}' > "$@"
 
 $(CAPTURE_BIN): $(CAPTURE_SRC)
 	"$(CC)" $(HOST_CFLAGS) "$(CAPTURE_SRC)" $(HOST_LDFLAGS) -pthread -lm -o "$@"
@@ -68,7 +68,9 @@ host-capture: $(CAPTURE_BIN)
 		old="$(GENERATED_FIXTURES).old.$$"; \
 		mv "$(GENERATED_FIXTURES)" "$$old"; \
 	fi; \
-	if ! mv "$$stage" "$(GENERATED_FIXTURES)"; then \
+	if mv "$$stage" "$(GENERATED_FIXTURES)"; then \
+		:; \
+	else \
 		status=$$?; \
 		if [ -n "$$old" ] && [ -e "$$old" ]; then mv "$$old" "$(GENERATED_FIXTURES)" || status=1; fi; \
 		exit "$$status"; \
