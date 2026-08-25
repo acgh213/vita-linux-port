@@ -28,6 +28,31 @@ Read-only inventory of the running Linux instance:
 It does not require Python, Lua, curl, or a writable persistent filesystem.
 `VITA_DIAG_ROOT` is a host-test seam; production use leaves it unset.
 
+## Building the payload
+
+The host builder stages only the approved toolkit files and emits a deterministic
+manifest before invoking `mksquashfs`:
+
+```sh
+tools/build-vita-toolkit-squashfs.sh \
+  --source toolkit \
+  --output dist/vita-toolkit.squashfs
+```
+
+Useful safe inspection modes:
+
+```sh
+tools/build-vita-toolkit-squashfs.sh --source toolkit --manifest-only
+tools/build-vita-toolkit-squashfs.sh --source toolkit --dry-run
+```
+
+The builder refuses overwrite by default, excludes local overlays and
+credentials, fixes the image timestamp, uses one compressor worker for
+reproducibility, and prints the final SHA-256. The actual `mksquashfs` step is
+an explicit host gate in environments whose command safety layer blocks
+filesystem-image creation; the manifest and dry-run paths remain testable
+without it.
+
 ## Second command: `vita-netdiag`
 
 Read-only network inventory using the image's existing `eth0` and `mlan0`
