@@ -53,6 +53,21 @@ an explicit host gate in environments whose command safety layer blocks
 filesystem-image creation; the manifest and dry-run paths remain testable
 without it.
 
+## Mounting the external payload
+
+`vita-toolkit-mount` is installed in the embedded rescue environment so the
+rescue layer can mount the USB payload without depending on the payload itself.
+It requires an explicit source and uses a read-only SquashFS mount:
+
+```sh
+vita-toolkit-mount --device /dev/sda1 --target /opt/vita-toolkit --machine
+vita-toolkit-mount --unmount --target /opt/vita-toolkit --machine
+```
+
+Automatic USB discovery is intentionally not part of this first helper.
+Mounts use `ro,nosuid,nodev`; the helper refuses system directories and reports
+stable status fields for scripts.
+
 ## Second command: `vita-netdiag`
 
 Read-only network inventory using the image's existing `eth0` and `mlan0`

@@ -12,6 +12,7 @@ printf '%s\n' "$manifest"
 printf '%s\n' "$manifest" | grep -F 'VERSION ' >/dev/null
 printf '%s\n' "$manifest" | grep -F 'bin/vita-diag ' >/dev/null
 printf '%s\n' "$manifest" | grep -F 'bin/vita-netdiag ' >/dev/null
+printf '%s\n' "$manifest" | grep -F 'bin/vita-toolkit-mount ' >/dev/null
 if printf '%s\n' "$manifest" | grep -E '\.ssh|wpa_supplicant|local/' >/dev/null; then
     printf 'FAIL: manifest contains forbidden local material\n' >&2
     exit 1

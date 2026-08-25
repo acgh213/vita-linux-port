@@ -1,0 +1,104 @@
+#!/bin/sh
+# Mount or unmount the read-only Vita toolkit payload.
+set -eu
+
+SOURCE=
+TARGET=/opt/vita-toolkit
+MACHINE=0
+ACTION=mount
+PROC_MOUNTS=${VITA_TOOLKIT_PROC_MOUNTS:-/proc/mounts}
+MOUNT_CMD=${VITA_TOOLKIT_MOUNT_CMD:-mount}
+UMOUNT_CMD=${VITA_TOOLKIT_UMOUNT_CMD:-umount}
+
+usage() {
+    printf '%s\n' \
+        'usage: vita-toolkit-mount --device DEVICE [--target DIR] [--machine]' \
+        '       vita-toolkit-mount --unmount [--target DIR] [--machine]' \
+        '  --device DEVICE       explicit SquashFS block device or image path' \
+        '  --target DIR          mountpoint (default: /opt/vita-toolkit)' \
+        '  --unmount             unmount the selected target' \
+        '  --machine             stable key=value output'
+}
+
+fail() {
+    printf 'vita-toolkit-mount: %s\n' "$1" >&2
+    exit 1
+}
+
+valid_path() {
+    path=$1
+    case "$path" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    case "$path" in
+        *..*|*[!A-Za-z0-9_./:-]*) return 1 ;;
+    esac
+    case "$path" in
+        /|/dev|/proc|/sys|/run|/etc|/bin|/sbin|/usr|/var|/home) return 1 ;;
+    esac
+    return 0
+}
+
+mounted_source() {
+    awk -v target="$TARGET" '$2 == target { print $1; found=1 } END { if (!found) exit 1 }' "$PROC_MOUNTS" 2>/dev/null
+}
+
+report() {
+    key=$1
+    value=$2
+    if [ "$MACHINE" -eq 1 ]; then
+        printf '%s=%s\n' "$key" "$value"
+    else
+        printf '%s: %s\n' "$key" "$value"
+    fi
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --device)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            SOURCE=$2; shift 2 ;;
+        --target)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            TARGET=$2; shift 2 ;;
+        --unmount) ACTION=unmount; shift ;;
+        --machine) MACHINE=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+
+valid_path "$TARGET" || fail "unsafe mount target: $TARGET"
+[ -r "$PROC_MOUNTS" ] || fail "cannot read mount table: $PROC_MOUNTS"
+
+if [ "$ACTION" = unmount ]; then
+    current=$(mounted_source) || fail "target is not mounted: $TARGET"
+    "$UMOUNT_CMD" "$TARGET" || fail "unmount failed: $TARGET"
+    report status unmounted
+    report target "$TARGET"
+    report source "$current"
+    exit 0
+fi
+
+[ -n "$SOURCE" ] || fail '--device is required; automatic discovery is disabled'
+valid_path "$SOURCE" || fail "unsafe device or image path: $SOURCE"
+[ -e "$SOURCE" ] || fail "device or image does not exist: $SOURCE"
+
+if current=$(mounted_source); then
+    [ "$current" = "$SOURCE" ] || fail "target is already mounted from another source: $TARGET"
+    report status already_mounted
+    report target "$TARGET"
+    report source "$SOURCE"
+    exit 0
+fi
+
+mkdir -p "$TARGET" || fail "cannot create mountpoint: $TARGET"
+[ -d "$TARGET" ] || fail "mountpoint is not a directory: $TARGET"
+"$MOUNT_CMD" -t squashfs -o ro,nosuid,nodev "$SOURCE" "$TARGET" || fail "mount failed"
+
+report status mounted
+report target "$TARGET"
+report source "$SOURCE"
+report filesystem squashfs
+report options ro,nosuid,nodev
