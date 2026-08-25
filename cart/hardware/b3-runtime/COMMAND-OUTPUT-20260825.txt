@@ -1,0 +1,32 @@
+--- preflight ---
+normal_pid=547
+online=0-3
+fbcon=0
+normal_sha256=4eee4b0676a546b1d576af8a7f3f97a7ad01d6e9db95a238b3a9ac785fadae0b
+normal_save_bytes=3686400
+--- stop known-good cart ---
+stopped /usr/local/bin/pstv-demo-cart (pid 547)
+PSTV Demo Cart stopped; framebuffer console restored
+after_normal_stop_fbcon=1
+--- start B3 runtime cart ---
+PSTV Demo Cart running (pid 4625); log: /run/pstv-demo-cart.log
+b3_pid=4625
+b3_exe=/tmp/pstv-demo-cart-b3-runtime
+b3_sha256=4f27774edf069e1b48fe1612bf5b6391e42debb94b72d3e10e171a09a10e8121
+b3_fbcon=0
+b3_online=0-3
+--- frame capture ---
+b3_frame_bytes=3686400
+b3_frame_sha256=8cc69123b85b8ea7806cdcfdbf44309077867166a8af5cf6ac3c6a37db61ea86
+--- restore known-good cart ---
+stopped /tmp/pstv-demo-cart-b3-runtime (pid 4625)
+PSTV Demo Cart stopped; framebuffer console restored
+after_b3_stop_fbcon=1
+PSTV Demo Cart running (pid 5184); log: /run/pstv-demo-cart.log
+final_pid=5184
+final_exe=/usr/local/bin/pstv-demo-cart
+final_fbcon=0
+final_online=0-3
+final_save_bytes=3686400
+--- fault scan ---
+fault_scan=clean

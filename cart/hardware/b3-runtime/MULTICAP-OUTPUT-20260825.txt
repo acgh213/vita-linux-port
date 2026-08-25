@@ -1,0 +1,35 @@
+--- stop known-good ---
+stopped /usr/local/bin/pstv-demo-cart (pid 5184)
+PSTV Demo Cart stopped; framebuffer console restored
+fbcon_after_stop=1
+--- start B3 ---
+PSTV Demo Cart running (pid 14247); log: /run/pstv-demo-cart.log
+b3_pid=14247
+b3_exe=/tmp/pstv-demo-cart-b3-runtime
+--- capture sequence ---
+cap1=604b922891dd662cb585de6893c4ef7a28231e538ec1d7791403a8908372e385 bytes=3686400
+cap2=312e74c1897262a877cc775744336efef6cf0f4885c8a656ecdf0117b0a6b487 bytes=3686400
+cap3=f0f6bd18394864945d59970d831e526c191bb5ef0d49dabe5b5a0da631ad3d48 bytes=3686400
+cap4=b87de093a70a3b017d68d43bb93280af433a16a7821d90862225627830c227a1 bytes=3686400
+cap5=77ee03e21d7ad851ccdc99056253c96b9b9334a86e15367f68c8fb3d7219efda bytes=3686400
+--- restore known-good ---
+stopped /tmp/pstv-demo-cart-b3-runtime (pid 14247)
+PSTV Demo Cart stopped; framebuffer console restored
+fbcon_after_b3_stop=1
+PSTV Demo Cart running (pid 15678); log: /run/pstv-demo-cart.log
+final_pid=15678
+final_exe=/usr/local/bin/pstv-demo-cart
+final_fbcon=0
+--- fault scan ---
+fault_scan=clean
+--- control: known-good cart ---
+pid=15678
+exe=/usr/local/bin/pstv-demo-cart
+fbcon=0
+ctrl1=8ee8f0771689777daf69c71bba4e698c97c0d4251cfa08dc85bb44421165bdc9 bytes=3686400
+ctrl2=aca23e6750f3cb8f74a37718237f0814a5481f144fe838e0830a9867f959a7cd bytes=3686400
+ctrl3=a5ef5d10746f46a8bac4428759a0c9f6500a87e45ed3773dfc97b70f03f028ec bytes=3686400
+ctrl4=9d7d0a95ba7a5dba153da4e24cd373baf5d1a7f3df3e3b3db84ff63ff2ca7554 bytes=3686400
+ctrl5=8fb3b78f61a724302c80cc45c17d1db74cc3345d0fecd74b50a5e24bfa5c83bb bytes=3686400
+--- fault scan ---
+fault_scan=clean

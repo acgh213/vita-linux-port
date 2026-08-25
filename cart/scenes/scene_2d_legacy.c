@@ -8,6 +8,7 @@
 #define LW 320
 #define LH 180
 #define SCENES 6
+#define LEGACY_FRAME_PERIOD UINT64_C(65536)
 
 static _Thread_local struct cart_canvas *current_canvas;
 static float sins[2048];
@@ -264,22 +265,30 @@ int cart_legacy_scenes_init(void)
     return 0;
 }
 
+static int legacy_frame_phase(uint64_t frame)
+{
+    return (int)(frame % LEGACY_FRAME_PERIOD);
+}
+
 static void render_legacy_scene(const struct cart_scene_render_context *context, int which)
 {
+    int frame;
+
     if (context == NULL || context->canvas == NULL || which < 0 || which >= SCENES)
         return;
+    frame = legacy_frame_phase(context->frame);
     current_canvas = context->canvas;
     if (context->phase == CART_SCENE_RENDER_ROWS) {
         switch (which) {
-        case 0: scene_candy(context->row_start, context->row_end, context->frame); break;
-        case 1: scene_checker(context->row_start, context->row_end, context->frame); break;
-        case 2: scene_bubbles(context->row_start, context->row_end, context->frame); break;
-        case 3: scene_ribbons(context->row_start, context->row_end, context->frame); break;
-        case 4: scene_chrome(context->row_start, context->row_end, context->frame); break;
-        default: scene_sugar(context->row_start, context->row_end, context->frame); break;
+        case 0: scene_candy(context->row_start, context->row_end, frame); break;
+        case 1: scene_checker(context->row_start, context->row_end, frame); break;
+        case 2: scene_bubbles(context->row_start, context->row_end, frame); break;
+        case 3: scene_ribbons(context->row_start, context->row_end, frame); break;
+        case 4: scene_chrome(context->row_start, context->row_end, frame); break;
+        default: scene_sugar(context->row_start, context->row_end, frame); break;
         }
     } else {
-        overlay(which, context->frame);
+        overlay(which, frame);
     }
     current_canvas = NULL;
 }

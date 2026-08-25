@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <cart/canvas.h>
+#include <cart/runtime.h>
 #include <cart/scene.h>
 
 #include <errno.h>
@@ -36,13 +37,11 @@ static struct cart_canvas low_canvas = {
     .height = LH,
     .stride = LW,
 };
-static int scene = 0;
-static int frame_no = 0;
 
 struct job {
     int row_start;
     int row_end;
-    int frame;
+    uint64_t frame;
     const struct cart_scene *scene;
 };
 
@@ -61,7 +60,7 @@ static void *worker(void *arg)
     return NULL;
 }
 
-static void render_frame(int which, int frame)
+static void render_frame(int which, uint64_t frame)
 {
     const struct cart_scene *selected;
     pthread_t threads[THREADS];
@@ -118,6 +117,24 @@ static void on_signal(int sig)
     else running=0;
 }
 
+static int monotonic_now_ns(uint64_t *now_ns)
+{
+    struct timespec now;
+
+    if (now_ns == NULL || clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return -1;
+    *now_ns = (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec;
+    return 0;
+}
+
+static struct timespec timespec_from_ns(uint64_t value_ns)
+{
+    return (struct timespec) {
+        .tv_sec = (time_t)(value_ns / UINT64_C(1000000000)),
+        .tv_nsec = (long)(value_ns % UINT64_C(1000000000)),
+    };
+}
+
 int main(int argc,char **argv)
 {
     const char *dump=NULL; int dump_scene=0, dump_frame=120;
@@ -139,28 +156,72 @@ int main(int argc,char **argv)
     if(v.xres!=FW||v.yres!=FH||v.bits_per_pixel!=32||fix.line_length!=FW*4){fprintf(stderr,"unexpected fb %ux%u %ubpp stride %u\n",v.xres,v.yres,v.bits_per_pixel,fix.line_length);return 1;}
     uint32_t *fb=mmap(NULL,FW*FH*4,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0); if(fb==MAP_FAILED){perror("mmap");return 1;}
     int infd=open("/dev/input/event0",O_RDONLY|O_NONBLOCK);
-    struct timespec next, report_start;
-    clock_gettime(CLOCK_MONOTONIC,&next);
-    report_start=next;
-    int report_frame=0;
-    int manual_hold=0;
+    uint64_t now_ns;
+    if (monotonic_now_ns(&now_ns) != 0) {
+        perror("clock_gettime");
+        if (infd >= 0) close(infd);
+        munmap(fb, FW * FH * 4);
+        close(fd);
+        return 1;
+    }
+    struct cart_runtime runtime;
+    if (cart_runtime_init(&runtime, cart_scene_count(), now_ns,
+                          UINT64_C(1000000000) / FPS,
+                          UINT64_C(8) * UINT64_C(1000000000)) != 0) {
+        fprintf(stderr, "runtime initialization failed\n");
+        if (infd >= 0) close(infd);
+        munmap(fb, FW * FH * 4);
+        close(fd);
+        return 1;
+    }
+    uint64_t report_start_ns=now_ns;
+    uint64_t report_frame=0;
+    uint64_t rendered_frames=0;
     while(running){
-        if(next_scene_requested){scene=(scene+1)%SCENES;manual_hold=FPS*3600;next_scene_requested=0;}
-        if(!manual_hold) scene=(frame_no/(FPS*8))%SCENES;
+        if (monotonic_now_ns(&now_ns) != 0) {
+            perror("clock_gettime");
+            break;
+        }
+        if (cart_runtime_tick(&runtime, now_ns) != 0) {
+            fprintf(stderr, "runtime deadline exhausted\n");
+            break;
+        }
+        if(next_scene_requested){
+            cart_runtime_request_next(&runtime, now_ns,
+                                      UINT64_C(3600) * UINT64_C(1000000000));
+            next_scene_requested=0;
+        }
         if(infd>=0){struct input_event ev; while(read(infd,&ev,sizeof(ev))==(ssize_t)sizeof(ev)) if(ev.type==EV_KEY&&ev.value==1){
             if(ev.code==KEY_ESC||ev.code==KEY_Q)running=0;
-            else {scene=(scene+1)%SCENES;manual_hold=FPS*8;}
+            else cart_runtime_request_next(&runtime, now_ns,
+                                           UINT64_C(8) * UINT64_C(1000000000));
         }}
-        if(manual_hold>0)manual_hold--;
-        render_frame(scene,frame_no); upscale(fb); frame_no++;
-        if(frame_no-report_frame>=300){
-            struct timespec now; clock_gettime(CLOCK_MONOTONIC,&now);
-            double elapsed=(double)(now.tv_sec-report_start.tv_sec)+(double)(now.tv_nsec-report_start.tv_nsec)/1e9;
-            fprintf(stderr,"frames=%d scene=%d fps=%.2f\n",frame_no,scene,(frame_no-report_frame)/elapsed);
-            report_start=now; report_frame=frame_no;
+        render_frame((int)runtime.scene_index, runtime.frame); upscale(fb); rendered_frames++;
+        if(rendered_frames-report_frame>=300){
+            uint64_t elapsed_ns=now_ns-report_start_ns;
+            double elapsed=(double)elapsed_ns/1e9;
+            if (elapsed > 0.0)
+                fprintf(stderr,"frames=%llu scene=%zu fps=%.2f dropped=%llu\n",
+                        (unsigned long long)rendered_frames, runtime.scene_index,
+                        (rendered_frames-report_frame)/elapsed,
+                        (unsigned long long)runtime.dropped_deadlines);
+            report_start_ns=now_ns; report_frame=rendered_frames;
         }
-        next.tv_nsec+=1000000000/FPS; if(next.tv_nsec>=1000000000){next.tv_sec++;next.tv_nsec-=1000000000;}
-        clock_nanosleep(CLOCK_MONOTONIC,TIMER_ABSTIME,&next,NULL);
+        if (monotonic_now_ns(&now_ns) != 0) {
+            perror("clock_gettime");
+            break;
+        }
+        if (cart_runtime_tick(&runtime, now_ns) != 0) {
+            fprintf(stderr, "runtime deadline exhausted\n");
+            break;
+        }
+        struct timespec delay=timespec_from_ns(runtime.sleep_ns);
+        int sleep_status=clock_nanosleep(CLOCK_MONOTONIC,0,&delay,NULL);
+        if (sleep_status != 0 && sleep_status != EINTR) {
+            errno=sleep_status;
+            perror("clock_nanosleep");
+            break;
+        }
     }
     if(infd>=0)close(infd);
     munmap(fb,FW*FH*4);
