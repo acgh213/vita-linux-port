@@ -57,15 +57,23 @@ without it.
 
 `vita-toolkit-mount` is installed in the embedded rescue environment so the
 rescue layer can mount the USB payload without depending on the payload itself.
-It requires an explicit source and uses a read-only SquashFS mount:
+The storage partition and payload image are separate explicit steps:
 
 ```sh
-vita-toolkit-mount --device /dev/sda1 --target /opt/vita-toolkit --machine
+mount -t exfat -o ro /dev/<storage-partition> /mnt/vita-storage
+vita-toolkit-mount --file /mnt/vita-storage/vita-toolkit.squashfs \
+  --target /opt/vita-toolkit --machine
 vita-toolkit-mount --unmount --target /opt/vita-toolkit --machine
+umount /mnt/vita-storage
 ```
 
-Automatic USB discovery is intentionally not part of this first helper.
-Mounts use `ro,nosuid,nodev`; the helper refuses system directories and reports
+`/dev/<storage-partition>` is deliberately a placeholder: device names can
+change with USB enumeration order. Confirm the actual partition first, then
+pass that exact path explicitly. Automatic USB discovery is intentionally not
+part of this first helper.
+
+Storage is mounted read-only as exFAT; the SquashFS image uses a read-only loop
+mount with `nosuid,nodev`. The helper refuses system directories and reports
 stable status fields for scripts.
 
 ## Second command: `vita-netdiag`

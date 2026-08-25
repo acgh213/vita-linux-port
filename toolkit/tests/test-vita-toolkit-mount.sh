@@ -65,4 +65,14 @@ unmounted=$(VITA_TOOLKIT_PROC_MOUNTS="$PROC" \
     VITA_TOOLKIT_TEST_PROC="$PROC" \
     "$TOOL" --unmount --target "$TARGET" --machine)
 printf '%s\n' "$unmounted" | grep -F 'status=unmounted' >/dev/null
+
+file_mounted=$(VITA_TOOLKIT_PROC_MOUNTS="$PROC" \
+    VITA_TOOLKIT_MOUNT_CMD="$MOUNT" \
+    VITA_TOOLKIT_UMOUNT_CMD="$UMOUNT" \
+    VITA_TOOLKIT_TEST_LOG="$LOG" \
+    VITA_TOOLKIT_TEST_PROC="$PROC" \
+    "$TOOL" --file "$SOURCE" --target "$TARGET" --machine)
+printf '%s\n' "$file_mounted" | grep -F 'source_type=file' >/dev/null
+printf '%s\n' "$file_mounted" | grep -F 'options=loop,ro,nosuid,nodev' >/dev/null
+grep -F -- '-t squashfs -o loop,ro,nosuid,nodev' "$LOG" >/dev/null
 printf 'vita-toolkit-mount test passed\n'
