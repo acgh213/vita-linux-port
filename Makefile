@@ -207,8 +207,11 @@ verify-dtb: ## verify all Vita DTBs were built
 
 CART_CROSS_CC ?= arm-linux-gnueabihf-gcc
 
-cart-test: ## run complete demo-cart regression and provenance gates
+cart-test: ## run complete demo-cart regression and provenance fixture gates
 	$(MAKE) -C cart complete-test CROSS_CC="$(CART_CROSS_CC)"
+
+cart-verify-production: ## verify the exact known-good cart artifact locally
+	$(MAKE) -C cart verify-production CROSS_CC="$(CART_CROSS_CC)"
 
 test: ## run build-contract regression tests
 	@MAKE_CMD="$(MAKE)" ./tests/test-dtb-build.sh

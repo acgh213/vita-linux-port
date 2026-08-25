@@ -19,7 +19,7 @@ HOST_LDFLAGS := -fsanitize=address,undefined
 TARGET_CFLAGS := -O3 -static -pthread -Wall -Wextra -Werror -march=armv7-a -mfpu=neon -mfloat-abi=hard
 TARGET_BIN := $(BUILD_DIR)/pstv-demo-cart.arm
 
-.PHONY: all host-sanitize host-capture capture cross-build cross-verify test complete-test clean FORCE
+.PHONY: all host-sanitize host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
 
 FORCE:
 
@@ -181,6 +181,12 @@ complete-test: test
 	"$(SHELL)" "$(CART_DIR)/tests/test_make_harness.sh"
 	"$(SHELL)" "$(CART_DIR)/tests/test_verify_baseline.sh"
 	"$(SHELL)" "$(CART_DIR)/tests/test_fb_ownership.sh"
+
+# Exact artifact hashing is intentionally a production-lane gate: compilers may
+# emit distinct static ELFs across toolchains even when cross-verify proves the
+# same ARM ABI contract. CI runs complete-test; the known-good toolchain runs
+# this target against the deployable artifact.
+verify-production: cross-verify
 	"$(SHELL)" "$(CART_DIR)/scripts/verify-baseline.sh" --repo "$(abspath $(CART_DIR)/..)" --arm-binary "$(TARGET_BIN)"
 
 clean:
