@@ -1,0 +1,32 @@
+--- preflight ---
+normal_pid=27972
+online=0-3
+fbcon=0
+normal_sha256=4eee4b0676a546b1d576af8a7f3f97a7ad01d6e9db95a238b3a9ac785fadae0b
+--- stop known-good cart ---
+stopped /usr/local/bin/pstv-demo-cart (pid 27972)
+PSTV Demo Cart stopped; framebuffer console restored
+after_normal_stop_fbcon=1
+--- start B1 canvas cart ---
+PSTV Demo Cart running (pid 13886); log: /run/pstv-demo-cart.log
+b1_pid=13886
+b1_exe=/tmp/pstv-demo-cart-b1-canvas
+b1_sha256=0b0a1f2993d2dbb73da1a6b508422811295dab15a3466876f9e5d4b3d94803d7
+b1_fbcon=0
+b1_online=0-3
+b1_frame_bytes=3686400
+b1_frame_sha256=ec2d72afe9294dc26dd6453d612b7402a5de15fb6affc928691fa5977968d5a1
+--- restore known-good cart ---
+stopped /tmp/pstv-demo-cart-b1-canvas (pid 13886)
+PSTV Demo Cart stopped; framebuffer console restored
+after_b1_stop_fbcon=1
+PSTV Demo Cart running (pid 14200); log: /run/pstv-demo-cart.log
+final_pid=14200
+final_exe=/usr/local/bin/pstv-demo-cart
+final_fbcon=0
+final_online=0-3
+final_save_bytes=3686400
+--- fault scan ---
+[    0.000000] printk: debug: skip boot console de-registration.
+PSTV Demo Cart stopped; framebuffer console restored
+PSTV Demo Cart running (pid 14539); log: /run/pstv-demo-cart.log
