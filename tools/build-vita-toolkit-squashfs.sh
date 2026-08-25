@@ -36,6 +36,7 @@ done
 [ -d "$SOURCE" ] || { printf 'missing source: %s\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-diag" ] || { printf 'missing source file: %s/bin/vita-diag\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-netdiag" ] || { printf 'missing source file: %s/bin/vita-netdiag\n' "$SOURCE" >&2; exit 1; }
+[ -f "$SOURCE/bin/vita-toolkit-mount" ] || { printf 'missing source file: %s/bin/vita-toolkit-mount\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/squashfs/VERSION" ] || { printf 'missing source file: %s/squashfs/VERSION\n' "$SOURCE" >&2; exit 1; }
 
 if [ "$MODE" != manifest ] && [ "$FORCE" -ne 1 ] && [ -e "$OUTPUT" ]; then
@@ -54,6 +55,7 @@ chmod 0755 "$STAGE" "$STAGE/bin" "$STAGE/share"
 
 install -m 0755 "$SOURCE/bin/vita-diag" "$STAGE/bin/vita-diag"
 install -m 0755 "$SOURCE/bin/vita-netdiag" "$STAGE/bin/vita-netdiag"
+install -m 0755 "$SOURCE/bin/vita-toolkit-mount" "$STAGE/bin/vita-toolkit-mount"
 install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
 install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
 
@@ -75,7 +77,7 @@ file_mode() {
 
 MANIFEST=$STAGE/MANIFEST
 : > "$MANIFEST"
-for rel in VERSION bin/vita-diag bin/vita-netdiag share/README.md; do
+for rel in VERSION bin/vita-diag bin/vita-netdiag bin/vita-toolkit-mount share/README.md; do
     file=$STAGE/$rel
     printf '%s %s %s %s\n' "$rel" "$(file_mode "$file")" \
         "$(file_size "$file")" "$(hash_file "$file")" >> "$MANIFEST"
