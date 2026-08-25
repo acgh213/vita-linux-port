@@ -205,8 +205,18 @@ verify-dtb: ## verify all Vita DTBs were built
 		file "$(DTS_DIR)/$$model.dtb"; \
 	done
 
+CART_CROSS_CC ?= arm-linux-gnueabihf-gcc
+
+cart-test: ## run complete demo-cart regression and provenance fixture gates
+	$(MAKE) -C cart complete-test CROSS_CC="$(CART_CROSS_CC)"
+
+cart-verify-production: ## verify the exact known-good cart artifact locally
+	$(MAKE) -C cart verify-production CROSS_CC="$(CART_CROSS_CC)"
+
 test: ## run build-contract regression tests
 	@MAKE_CMD="$(MAKE)" ./tests/test-dtb-build.sh
+	@MAKE_CMD="$(MAKE)" ./tests/test-worktree.sh
+	@$(MAKE) cart-test
 
 # ------- LSP / clangd -------
 
@@ -390,7 +400,8 @@ worktree: ## create outer worktree at ../vita-wt/<NAME>
 		echo "ERROR: NAME is required. Usage: make worktree NAME=<name> [BASE=HEAD]"; \
 		exit 1; \
 	fi
-	@DEST="$(WORKTREE_BASE_DIR)/$(NAME)"; \
+	@set -e; \
+	DEST="$(WORKTREE_BASE_DIR)/$(NAME)"; \
 	echo "Creating outer worktree at $$DEST..."; \
 	if git show-ref --verify --quiet "refs/heads/$(NAME)" 2>/dev/null; then \
 		echo "  Branch $(NAME) exists locally"; \
@@ -408,15 +419,21 @@ worktree: ## create outer worktree at ../vita-wt/<NAME>
 	ln -sfn "$$MAIN_DIR/refs" "$$DEST/refs"; \
 	if [ "$(INIT_SUBMODULES)" = "1" ]; then \
 		echo "Initializing submodules (integration worktree)..."; \
-		git -C "$$DEST" submodule update --init --reference-if-able "$(CACHE_DIR)"; \
+		if ! git -C "$$DEST" submodule update --init; then \
+			echo "ERROR: Submodule initialization failed; rolling back integration worktree."; \
+			if git worktree remove --force "$$DEST"; then \
+				echo "Rolled back failed integration worktree at $$DEST."; \
+				echo "  Branch $(NAME) was retained for retry."; \
+			else \
+				echo "ERROR: Rollback failed; integration worktree retained at $$DEST." >&2; \
+			fi; \
+			exit 1; \
+		fi; \
 		if [ "$(UNAME_S)" = "Darwin" ]; then \
 			./fix_case_sensitivity.sh "$$DEST/linux_vita"; \
 		fi; \
-		if [ -f "linux_vita/rootfs.cpio.zst" ]; then \
-			cp "linux_vita/rootfs.cpio.zst" "$$DEST/linux_vita/rootfs.cpio.zst"; \
-		else \
-			echo "  NOTE: rootfs.cpio.zst not found in linux_vita/ — run 'make rootfs' to build it"; \
-		fi; \
+		echo "  NOTE: rootfs.cpio.zst is a local convenience artifact and is not copied."; \
+		echo "        Run 'make rootfs' in the integration worktree to build it."; \
 		echo ""; \
 		echo "Integration worktree ready at $$DEST"; \
 		echo "  Run 'make config && make build' to build."; \

@@ -44,8 +44,10 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q bc flex bison libssl-dev libelf-dev
 
-      - name: Test build contract
-        run: make test
+      - name: Test build contract and complete demo-cart gate
+        run: |
+          export PATH="${{ github.workspace }}/.toolchains/${{ env.BOOTLIN_DIR }}/bin:$PATH"
+          make test CART_CROSS_CC=arm-linux-gcc
 
       - name: Configure kernel
         working-directory: linux_vita

@@ -7,7 +7,7 @@ AI agents.
 ## Architecture Overview
 
 ```
-~/.cache/vita-linux/linux.git            bare cache (all remotes, shared objects)
+~/.cache/vita-linux/linux.git            optional bare mirror (all remotes)
 
 vita-linux-port/                          main checkout (integration, primary build)
 ├── linux_vita/                           submodule checkout (default kernel)
@@ -33,13 +33,13 @@ vita-linux-port/                          main checkout (integration, primary bu
 |------|---------|----------|-----------------|
 | Kernel worktree | Driver/feature branches | `../vita-kernel-wt/<name>/` | Yes (shared objects via git worktree) |
 | Outer worktree | Scripts, Makefile, docs, agents | `../vita-wt/<name>/` | No (uses `LINUX_VITA_DIR`) |
-| Integration worktree | Submodule pin/bump, PR/CI validation | `../vita-wt/<name>/` with `INIT_SUBMODULES=1` | Yes (submodule init with `--reference`) |
+| Integration worktree | Submodule pin/bump, PR/CI validation | `../vita-wt/<name>/` with `INIT_SUBMODULES=1` | Yes (normal init at exact pinned commits) |
 
 ## Quick Reference
 
 ```sh
 # One-time setup
-make setup-cache              # create bare cache (speeds up clones/fetches)
+make setup-cache              # create the optional bare remote mirror
 make setup-git-config         # enable rerere + rebase.updateRefs in linux_vita
 
 # Kernel feature work
@@ -80,17 +80,19 @@ the Makefile lives), not the caller's CWD.
 
 **Location:** `~/.cache/vita-linux/linux.git`
 
-A bare clone with all known remotes. Used as `--reference-if-able` when
-initializing submodules, and as the object source for kernel worktrees. This
-avoids re-downloading the full Linux kernel history for each worktree.
+A standalone bare clone with all known remotes, maintained by the cache targets
+below. The worktree helpers do not use it automatically: integration worktrees
+initialize submodules normally, while kernel worktrees share objects with the
+existing `linux_vita` checkout through Git's worktree mechanism. In particular,
+the cache does not accelerate integration submodule initialization.
 
 ```sh
 make setup-cache     # create + fetch all remotes (idempotent, safe to re-run)
 make update-cache    # fetch new objects (run occasionally)
 ```
 
-The cache is optional. If it doesn't exist, `--reference-if-able` silently
-falls back to a normal fetch. CI and fresh machines work without it.
+The cache is optional and is available for manual fetch/reference workflows.
+Integration submodules and fresh machines work normally without it.
 
 ### Remotes in the cache
 
@@ -150,7 +152,8 @@ For integration work (needs kernel submodule):
 
 ```sh
 make worktree NAME=pr-review INIT_SUBMODULES=1
-# Also initializes submodules using the bare cache for speed
+# Initializes each submodule normally at its exact pinned commit
+# Does not copy rootfs.cpio.zst; run 'make rootfs' in the new worktree
 ```
 
 Options:

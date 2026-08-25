@@ -1,0 +1,14 @@
+Frozen v0.1 evidence bundle
+
+Source commit: f97e6cf47cba82789e39d21b09cfe681e4df929b
+
+Exact copied paths:
+- cart/src/pstv-demo-cart.c -> pstv-demo-cart.c
+- cart/scripts/start-demo-cart.sh -> start-demo-cart.sh
+- cart/scripts/stop-demo-cart.sh -> stop-demo-cart.sh
+- cart/README.md -> README.md
+
+The verifier hashes this immutable bundle against production-baseline.txt.
+Current start/stop wrappers are intentionally not checked against their v0.1
+hashes because they may contain post-v0.1 safety hardening. The current renderer
+source is checked against the frozen renderer hash.
