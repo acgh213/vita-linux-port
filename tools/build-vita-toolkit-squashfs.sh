@@ -50,6 +50,7 @@ fi
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/vita-toolkit-stage.XXXXXX")
 trap 'rm -rf "$STAGE"' 0 HUP INT TERM
 mkdir -p "$STAGE/bin" "$STAGE/share"
+chmod 0755 "$STAGE" "$STAGE/bin" "$STAGE/share"
 
 install -m 0755 "$SOURCE/bin/vita-diag" "$STAGE/bin/vita-diag"
 install -m 0755 "$SOURCE/bin/vita-netdiag" "$STAGE/bin/vita-netdiag"
