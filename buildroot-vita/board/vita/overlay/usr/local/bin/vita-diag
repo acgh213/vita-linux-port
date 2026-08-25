@@ -1,0 +1,94 @@
+#!/bin/sh
+# Read-only Vita Linux inventory. BusyBox/POSIX sh only.
+set -eu
+
+ROOT=${VITA_DIAG_ROOT:-/}
+MODE=pretty
+if [ "${1:-}" = "--machine" ]; then
+    MODE=machine
+    shift
+fi
+if [ "$#" -ne 0 ]; then
+    printf 'usage: %s [--machine]\n' "$0" >&2
+    exit 2
+fi
+
+path() {
+    case "$1" in
+        /*) printf '%s%s\n' "$ROOT" "$1" ;;
+        *) printf '%s/%s\n' "$ROOT" "$1" ;;
+    esac
+}
+
+get_file() {
+    file=$(path "$1")
+    if [ -r "$file" ]; then
+        tr '\n' ' ' < "$file" | sed 's/[[:space:]][[:space:]]*/ /g; s/[[:space:]]*$//'
+    else
+        printf 'UNKNOWN'
+    fi
+}
+
+uname_r=${VITA_DIAG_UNAME_R:-$(uname -r 2>/dev/null || printf UNKNOWN)}
+uname_m=${VITA_DIAG_UNAME_M:-$(uname -m 2>/dev/null || printf UNKNOWN)}
+uptime=$(get_file /proc/uptime | cut -d. -f1)
+[ -n "$uptime" ] || uptime=UNKNOWN
+
+meminfo=$(path /proc/meminfo)
+if [ -r "$meminfo" ]; then
+    mem_total=$(awk '$1 == "MemTotal:" {print $2}' "$meminfo")
+    mem_available=$(awk '$1 == "MemAvailable:" {print $2}' "$meminfo")
+else
+    mem_total=
+    mem_available=
+fi
+[ -n "$mem_total" ] || mem_total=UNKNOWN
+[ -n "$mem_available" ] || mem_available=UNKNOWN
+
+cpu_online=$(get_file /sys/devices/system/cpu/online)
+fb_geometry=$(get_file /sys/class/graphics/fb0/virtual_size)
+fb_format=$(get_file /sys/class/graphics/fb0/bits_per_pixel)
+[ -n "$cpu_online" ] || cpu_online=UNKNOWN
+[ -n "$fb_geometry" ] || fb_geometry=UNKNOWN
+[ -n "$fb_format" ] || fb_format=UNKNOWN
+
+interfaces=UNKNOWN
+net_root=$(path /sys/class/net)
+if [ -d "$net_root" ]; then
+    interfaces=
+    for entry in "$net_root"/*; do
+        [ -e "$entry" ] || continue
+        name=${entry##*/}
+        state=$(get_file "/sys/class/net/$name/operstate")
+        [ -n "$interfaces" ] && interfaces="$interfaces,$name:$state" || interfaces="$name:$state"
+    done
+    [ -n "$interfaces" ] || interfaces=UNKNOWN
+fi
+
+vita_links=UNKNOWN
+vita_root=$(path /dev/vita)
+if [ -d "$vita_root" ]; then
+    vita_links=
+    for name in idstorage os0 ur0 vd0; do
+        link="$vita_root/$name"
+        [ -L "$link" ] || continue
+        target=$(readlink "$link" 2>/dev/null || printf UNKNOWN)
+        [ -n "$vita_links" ] && vita_links="$vita_links,$name:$target" || vita_links="$name:$target"
+    done
+    [ -n "$vita_links" ] || vita_links=UNKNOWN
+fi
+
+if [ "$MODE" = machine ]; then
+    printf 'schema=1\n'
+    printf 'kernel=%s\narch=%s\nuptime_seconds=%s\n' "$uname_r" "$uname_m" "$uptime"
+    printf 'cpu_online=%s\nmem_total_kb=%s\nmem_available_kb=%s\n' "$cpu_online" "$mem_total" "$mem_available"
+    printf 'framebuffer_geometry=%s\nframebuffer_bits_per_pixel=%s\n' "$fb_geometry" "$fb_format"
+    printf 'interfaces=%s\nvita_links=%s\n' "$interfaces" "$vita_links"
+    exit 0
+fi
+
+printf 'Vita Linux diagnostics\n'
+printf '  kernel:       %s\n  architecture:  %s\n  uptime:        %s seconds\n' "$uname_r" "$uname_m" "$uptime"
+printf '  CPUs online:  %s\n  memory:        %s kB total, %s kB available\n' "$cpu_online" "$mem_total" "$mem_available"
+printf '  framebuffer:   %s, %s bpp\n' "$fb_geometry" "$fb_format"
+printf '  interfaces:    %s\n  Vita links:    %s\n' "$interfaces" "$vita_links"
