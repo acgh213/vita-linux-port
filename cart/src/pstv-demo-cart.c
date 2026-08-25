@@ -2,13 +2,13 @@
 #include <cart/canvas.h>
 #include <cart/runtime.h>
 #include <cart/scene.h>
+#include <cart/worker_pool.h>
 
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <linux/input.h>
 #include <math.h>
-#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -24,7 +24,7 @@
 #define SCALE 4
 #define FW (LW * SCALE)
 #define FH (LH * SCALE)
-#define THREADS 4
+#define RENDER_THREADS 4
 #define SCENES 6
 #define FPS 30
 
@@ -38,49 +38,49 @@ static struct cart_canvas low_canvas = {
     .stride = LW,
 };
 
-struct job {
-    int row_start;
-    int row_end;
-    uint64_t frame;
-    const struct cart_scene *scene;
-};
+/* One render job slot per worker; the pool writes bands in lockstep and
+ * these live for the process lifetime. The selected scene is published here
+ * before each dispatch (contexts have no scene member by ABI contract). */
+static struct cart_scene_render_context row_contexts[CART_WORKER_POOL_MAX];
+static void *row_slots[CART_WORKER_POOL_MAX];
+static const struct cart_scene *row_scene;
+static struct cart_worker_pool render_pool;
 
-static void *worker(void *arg)
+static void row_job(void *slot, int row_start, int row_end, uint64_t frame)
 {
-    const struct job *job = arg;
-    const struct cart_scene_render_context context = {
-        .canvas = &low_canvas,
-        .row_start = job->row_start,
-        .row_end = job->row_end,
-        .frame = job->frame,
-        .phase = CART_SCENE_RENDER_ROWS,
-    };
+    struct cart_scene_render_context *context = slot;
 
-    job->scene->render(&context);
-    return NULL;
+    context->row_start = row_start;
+    context->row_end = row_end;
+    context->frame = frame;
+    context->phase = CART_SCENE_RENDER_ROWS;
+    row_scene->render(context);
 }
 
 static void render_frame(int which, uint64_t frame)
 {
     const struct cart_scene *selected;
-    pthread_t threads[THREADS];
-    struct job jobs[THREADS];
     struct cart_scene_render_context overlay_context;
 
     selected = cart_scene_at((size_t)which);
     if (selected == NULL || selected->render == NULL)
         return;
-    for (int index = 0; index < THREADS; index++) {
-        jobs[index] = (struct job) {
-            .row_start = index * LH / THREADS,
-            .row_end = (index + 1) * LH / THREADS,
-            .frame = frame,
-            .scene = selected,
-        };
-        pthread_create(&threads[index], NULL, worker, &jobs[index]);
+    row_scene = selected;
+    {
+        /* Bind the canvas for every active context — including slot 0 in
+         * inline mode, which the pool never touches on its own. */
+        int to_bind = render_pool.worker_count > 0 ? render_pool.worker_count : 1;
+
+        for (int index = 0; index < to_bind && index < CART_WORKER_POOL_MAX; index++)
+            row_contexts[index].canvas = &low_canvas;
     }
-    for (int index = 0; index < THREADS; index++)
-        pthread_join(threads[index], NULL);
+    if (render_pool.worker_count > 0) {
+        if (cart_worker_pool_dispatch(&render_pool, row_job, row_slots,
+                                      frame) != 0)
+            return;
+    } else {
+        row_job(&row_contexts[0], 0, LH, frame);
+    }
     overlay_context = (struct cart_scene_render_context) {
         .canvas = &low_canvas,
         .row_start = 0,
@@ -147,7 +147,17 @@ int main(int argc,char **argv)
         fprintf(stderr, "scene initialization failed\n");
         return 1;
     }
-    if(dump){render_frame(dump_scene,dump_frame);return dump_ppm(dump);}
+    /* Dump mode runs inline (thread-free, deterministic); live rendering
+     * uses the persistent pool created after fb setup. */
+    if (dump) {
+        if (cart_worker_pool_init(&render_pool, 0, LH) != 0) {
+            fprintf(stderr, "worker pool initialization failed\n");
+            return 1;
+        }
+        render_frame(dump_scene, dump_frame);
+        cart_worker_pool_shutdown(&render_pool);
+        return dump_ppm(dump);
+    }
 
     signal(SIGINT,on_signal); signal(SIGTERM,on_signal); signal(SIGHUP,on_signal); signal(SIGUSR1,on_signal);
     int fd=open("/dev/fb0",O_RDWR); if(fd<0){perror("/dev/fb0");return 1;}
@@ -165,6 +175,15 @@ int main(int argc,char **argv)
         return 1;
     }
     struct cart_runtime runtime;
+    for (int index = 0; index < CART_WORKER_POOL_MAX; index++)
+        row_slots[index] = &row_contexts[index];
+    if (cart_worker_pool_init(&render_pool, RENDER_THREADS, LH) != 0) {
+        fprintf(stderr, "worker pool initialization failed\n");
+        if (infd >= 0) close(infd);
+        munmap(fb, FW * FH * 4);
+        close(fd);
+        return 1;
+    }
     if (cart_runtime_init(&runtime, cart_scene_count(), now_ns,
                           UINT64_C(1000000000) / FPS,
                           UINT64_C(8) * UINT64_C(1000000000)) != 0) {
@@ -223,6 +242,7 @@ int main(int argc,char **argv)
             break;
         }
     }
+    cart_worker_pool_shutdown(&render_pool);
     if(infd>=0)close(infd);
     munmap(fb,FW*FH*4);
     close(fd);
