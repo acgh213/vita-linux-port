@@ -62,11 +62,39 @@ static void test_unique_lookup_and_navigation(void)
     expect(cart_scene_previous(99) == NULL, "previous missing scene rejected");
 }
 
+static void test_high_frame_callbacks_remain_defined(void)
+{
+    static uint32_t pixels[320 * 180];
+    struct cart_canvas canvas = {
+        .pixels = pixels,
+        .width = 320,
+        .height = 180,
+        .stride = 320,
+    };
+
+    for (size_t index = 0; index < cart_scene_count(); index++) {
+        const struct cart_scene *scene = cart_scene_at(index);
+        struct cart_scene_render_context context = {
+            .canvas = &canvas,
+            .row_start = 0,
+            .row_end = 180,
+            .frame = UINT64_C(200000000),
+            .phase = CART_SCENE_RENDER_ROWS,
+        };
+
+        memset(pixels, 0, sizeof(pixels));
+        scene->render(&context);
+        context.phase = CART_SCENE_RENDER_OVERLAY;
+        scene->render(&context);
+    }
+}
+
 int main(void)
 {
     expect(cart_scenes_init() == 0, "scene system initialization");
     test_stable_builtin_order();
     test_unique_lookup_and_navigation();
+    test_high_frame_callbacks_remain_defined();
     printf("all scene registry tests passed\n");
     return 0;
 }

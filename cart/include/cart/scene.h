@@ -19,7 +19,7 @@ struct cart_scene_render_context {
     struct cart_canvas *canvas;
     int row_start;
     int row_end;
-    int frame;
+    uint64_t frame;
     enum cart_scene_phase phase;
 };
 

@@ -1,0 +1,29 @@
+#ifndef CART_RUNTIME_H
+#define CART_RUNTIME_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+struct cart_runtime {
+    size_t scene_count;
+    size_t scene_index;
+    size_t manual_scene_index;
+    uint64_t origin_ns;
+    uint64_t frame_period_ns;
+    uint64_t scene_period_ns;
+    uint64_t manual_hold_until_ns;
+    uint64_t next_deadline_ns;
+    uint64_t frame;
+    uint64_t dropped_deadlines;
+    uint64_t sleep_ns;
+    int manual_hold_active;
+};
+
+int cart_runtime_init(struct cart_runtime *runtime, size_t scene_count,
+                      uint64_t origin_ns, uint64_t frame_period_ns,
+                      uint64_t scene_period_ns);
+int cart_runtime_tick(struct cart_runtime *runtime, uint64_t now_ns);
+void cart_runtime_request_next(struct cart_runtime *runtime, uint64_t now_ns,
+                               uint64_t hold_ns);
+
+#endif
