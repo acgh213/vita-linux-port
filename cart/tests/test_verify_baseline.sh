@@ -9,7 +9,7 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cart-verify-baseline.XXXXXX") || exit 1
 cleanup() {
     rm -rf "$TMP_ROOT"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup 0 HUP INT TERM
 
 fail() {
     printf 'not ok - %s\n' "$1" >&2
@@ -65,7 +65,7 @@ run_ok() {
     shift
     output=$TMP_ROOT/output
     error=$TMP_ROOT/error
-    if ! "$@" >"$output" 2>"$error"; then
+    if ! PATH="$TOOLS:$PATH" "$@" --arm-binary "$ARM_BINARY" --fixture-tools "$TOOLS" >"$output" 2>"$error"; then
         cat "$output" "$error" >&2
         fail "$label"
     fi
@@ -79,7 +79,12 @@ run_fail() {
     shift 2
     output=$TMP_ROOT/output
     error=$TMP_ROOT/error
-    if "$@" >"$output" 2>"$error"; then
+    if [ "$label" = 'ARM binary is explicitly required' ]; then
+        if "$@" >"$output" 2>"$error"; then
+            cat "$output" "$error" >&2
+            fail "$label unexpectedly passed"
+        fi
+    elif PATH="$TOOLS:$PATH" "$@" --arm-binary "$ARM_BINARY" --fixture-tools "$TOOLS" >"$output" 2>"$error"; then
         cat "$output" "$error" >&2
         fail "$label unexpectedly passed"
     fi
@@ -123,6 +128,54 @@ make_fixture() {
     git -C "$OUTER" commit -qm 'fixture production tree'
     OUTER_HEAD=$(git -C "$OUTER" rev-parse HEAD)
 
+    CART=$OUTER/cart
+    FROZEN=$CART/provenance/v0.1
+    mkdir -p "$FROZEN" "$CART/src" "$FIXTURE/tools"
+    printf 'frozen renderer\n' >"$FROZEN/pstv-demo-cart.c"
+    printf 'frozen start wrapper\n' >"$FROZEN/start-demo-cart.sh"
+    printf 'frozen stop wrapper\n' >"$FROZEN/stop-demo-cart.sh"
+    printf 'frozen readme\n' >"$FROZEN/README.md"
+    cp "$FROZEN/pstv-demo-cart.c" "$CART/src/pstv-demo-cart.c"
+    ARM_BINARY=$FIXTURE/pstv-demo-cart
+    printf 'fixture ARM binary\n' >"$ARM_BINARY"
+    chmod +x "$ARM_BINARY"
+    TOOLS=$FIXTURE/tools
+    export FIXTURE_ARM_BINARY="$ARM_BINARY"
+    cat >"$TOOLS/readelf" <<'EOF'
+#!/bin/sh
+case $1 in
+    -h)
+        case $2 in
+            *non-arm*) printf '%s\n' '  Class:                             ELF32' '  Data:                              2\047s complement, little endian' '  Type:                              EXEC (Executable file)' '  Machine:                           Advanced Micro Devices X86-64' '  Flags:                             0x0' ;;
+            *) printf '%s\n' '  Class:                             ELF32' '  Data:                              2\047s complement, little endian' '  Type:                              EXEC (Executable file)' '  Machine:                           ARM' '  Flags:                             0x5000400, Version5 EABI, hard-float ABI' ;;
+        esac
+        ;;
+    -l)
+        case $2 in
+            *dynamic*) printf '%s\n' '  INTERP         0x000134 0x00010134 0x00010134 0x00013 0x00013 R   0x1' ;;
+            *) printf '%s\n' 'There are no program headers in this file.' ;;
+        esac
+        ;;
+    -d)
+        case $2 in
+            *dynamic*) printf '%s\n' 'Dynamic section at offset 0x100 contains 1 entry:' ;;
+            *) printf '%s\n' 'There is no dynamic section in this file.' ;;
+        esac
+        ;;
+    *) exit 2 ;;
+esac
+EOF
+    cat >"$TOOLS/file" <<'EOF'
+#!/bin/sh
+[ "$1" != -b ] || shift
+printf '%s: ELF 32-bit LSB executable, ARM, EABI5 version 1 (GNU/Linux), statically linked\n' "$1"
+EOF
+    chmod +x "$TOOLS/readelf" "$TOOLS/file"
+    FROZEN_C_SHA256=$(sha256sum "$FROZEN/pstv-demo-cart.c" | awk '{ print $1 }')
+    FROZEN_START_SHA256=$(sha256sum "$FROZEN/start-demo-cart.sh" | awk '{ print $1 }')
+    FROZEN_STOP_SHA256=$(sha256sum "$FROZEN/stop-demo-cart.sh" | awk '{ print $1 }')
+    FROZEN_README_SHA256=$(sha256sum "$FROZEN/README.md" | awk '{ print $1 }')
+    ARM_BINARY_SHA256=$(sha256sum "$ARM_BINARY" | awk '{ print $1 }')
     BASELINE=$FIXTURE/baseline.txt
     EXPECTED=$FIXTURE/expected.txt
     write_values "$BASELINE" "$OUTER_HEAD" "$KERNEL_HEAD" "$LOADER_HEAD"
@@ -139,11 +192,11 @@ schema_version=1
 production_outer_commit=$outer
 production_kernel_gitlink=$kernel
 production_loader_gitlink=$loader
-known_good_pstv_demo_cart_c_sha256=0000000000000000000000000000000000000000000000000000000000000000
-known_good_start_demo_cart_sh_sha256=1111111111111111111111111111111111111111111111111111111111111111
-known_good_stop_demo_cart_sh_sha256=2222222222222222222222222222222222222222222222222222222222222222
-known_good_readme_md_sha256=3333333333333333333333333333333333333333333333333333333333333333
-known_good_demo_binary_sha256=4444444444444444444444444444444444444444444444444444444444444444
+known_good_pstv_demo_cart_c_sha256=$FROZEN_C_SHA256
+known_good_start_demo_cart_sh_sha256=$FROZEN_START_SHA256
+known_good_stop_demo_cart_sh_sha256=$FROZEN_STOP_SHA256
+known_good_readme_md_sha256=$FROZEN_README_SHA256
+known_good_demo_binary_sha256=$ARM_BINARY_SHA256
 target_model=pstv
 target_framebuffer=1280x720
 target_logical_render=320x180
@@ -161,7 +214,22 @@ run_invalid_diagnostic_test 'missing --repo argument' --repo
 make_fixture matching
 run_fail 'test hook requires explicit nonproduction override' 'expected constants require --allow-nonproduction' \
     "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED"
+run_fail 'ARM binary is explicitly required' 'FAIL arm_binary.required' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
 run_ok 'matching production-shaped local fixture' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
+printf 'mismatch\n' >>"$ARM_BINARY"
+run_fail 'ARM binary hash mismatch' 'FAIL arm_binary.sha256' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
+printf 'fixture ARM binary\n' >"$ARM_BINARY"
+cp "$ARM_BINARY" "$FIXTURE/non-arm-binary"
+SAVED_ARM_BINARY=$ARM_BINARY
+ARM_BINARY=$FIXTURE/non-arm-binary
+run_fail 'non-ARM binary is rejected' 'FAIL arm_binary.machine' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
+ARM_BINARY=$SAVED_ARM_BINARY
+printf 'mutated frozen renderer\n' >>"$FROZEN/pstv-demo-cart.c"
+run_fail 'mutated frozen renderer is rejected' 'FAIL provenance.v0_1.pstv_demo_cart_c_sha256' \
     "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
 
 make_fixture outer-mismatch

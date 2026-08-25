@@ -205,9 +205,15 @@ verify-dtb: ## verify all Vita DTBs were built
 		file "$(DTS_DIR)/$$model.dtb"; \
 	done
 
+CART_CROSS_CC ?= arm-linux-gnueabihf-gcc
+
+cart-test: ## run complete demo-cart regression and provenance gates
+	$(MAKE) -C cart complete-test CROSS_CC="$(CART_CROSS_CC)"
+
 test: ## run build-contract regression tests
 	@MAKE_CMD="$(MAKE)" ./tests/test-dtb-build.sh
 	@MAKE_CMD="$(MAKE)" ./tests/test-worktree.sh
+	@$(MAKE) cart-test
 
 # ------- LSP / clangd -------
 

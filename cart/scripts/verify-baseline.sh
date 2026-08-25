@@ -24,6 +24,8 @@ REQUIRED_KEYS='schema_version production_outer_commit production_kernel_gitlink 
 repo=${VITA_REPO_ROOT:-$DEFAULT_ROOT}
 baseline=
 expected=
+arm_binary=
+fixture_tools=
 allow_nonproduction=0
 
 fail() {
@@ -34,9 +36,9 @@ fail() {
 usage() {
     status=${1:-2}
     if [ "$status" -eq 0 ]; then
-        printf '%s\n' 'Usage: verify-baseline.sh [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction] [--allow-nonproduction]'
+        printf '%s\n' 'Usage: verify-baseline.sh --arm-binary PATH [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction --fixture-tools DIR]'
     else
-        printf '%s\n' 'Usage: verify-baseline.sh [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction] [--allow-nonproduction]' >&2
+        printf '%s\n' 'Usage: verify-baseline.sh --arm-binary PATH [--repo PATH] [--baseline PATH] [--expected PATH --allow-nonproduction --fixture-tools DIR]' >&2
     fi
     exit "$status"
 }
@@ -60,6 +62,16 @@ while [ "$#" -gt 0 ]; do
             expected=$2
             shift 2
             ;;
+        --arm-binary)
+            [ "$#" -ge 2 ] || usage
+            arm_binary=$2
+            shift 2
+            ;;
+        --fixture-tools)
+            [ "$#" -ge 2 ] || usage
+            fixture_tools=$2
+            shift 2
+            ;;
         --allow-nonproduction)
             allow_nonproduction=1
             shift
@@ -78,6 +90,13 @@ if [ -n "$expected" ] && [ "$allow_nonproduction" -ne 1 ]; then
 fi
 if [ "$allow_nonproduction" -eq 1 ] && [ -z "$expected" ]; then
     fail '--allow-nonproduction requires --expected PATH'
+fi
+if [ -n "$fixture_tools" ] && [ "$allow_nonproduction" -ne 1 ]; then
+    fail 'fixture_tools.nonproduction'
+fi
+[ -n "$arm_binary" ] || fail 'arm_binary.required'
+if ! { [ -f "$arm_binary" ] && [ ! -L "$arm_binary" ] && [ -r "$arm_binary" ] && [ -x "$arm_binary" ]; }; then
+    fail 'arm_binary.regular'
 fi
 
 if ! repo=$(CDPATH='' cd -- "$repo" && pwd -P); then
@@ -200,6 +219,94 @@ else
     check_production_value target_fps "$PRODUCTION_TARGET_FPS"
     check_production_value tinygl_tested_commit "$PRODUCTION_TINYGL_COMMIT"
 fi
+
+check_sha256() {
+    file=$1
+    expected_hash=$2
+    label=$3
+    if ! { [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ]; }; then
+        fail "$label"
+    fi
+    if ! actual_hash=$(sha256sum "$file" 2>/dev/null | awk '{ print $1 }'); then
+        fail "$label"
+    fi
+    [ "$actual_hash" = "$expected_hash" ] || fail "$label"
+}
+
+# The v0.1 files are an immutable evidence bundle extracted from f97e6cf.
+# Current launch/stop wrappers may be hardened later and are intentionally not
+# compared to these legacy hashes; only the active renderer remains frozen.
+check_sha256 "$repo/cart/provenance/v0.1/pstv-demo-cart.c" "$(value_from "$baseline" known_good_pstv_demo_cart_c_sha256)" 'provenance.v0_1.pstv_demo_cart_c_sha256'
+check_sha256 "$repo/cart/provenance/v0.1/start-demo-cart.sh" "$(value_from "$baseline" known_good_start_demo_cart_sh_sha256)" 'provenance.v0_1.start_demo_cart_sh_sha256'
+check_sha256 "$repo/cart/provenance/v0.1/stop-demo-cart.sh" "$(value_from "$baseline" known_good_stop_demo_cart_sh_sha256)" 'provenance.v0_1.stop_demo_cart_sh_sha256'
+check_sha256 "$repo/cart/provenance/v0.1/README.md" "$(value_from "$baseline" known_good_readme_md_sha256)" 'provenance.v0_1.readme_md_sha256'
+check_sha256 "$repo/cart/src/pstv-demo-cart.c" "$(value_from "$baseline" known_good_pstv_demo_cart_c_sha256)" 'source.pstv_demo_cart_c_sha256'
+printf 'PASS provenance.v0_1_bundle\n'
+printf 'PASS source.pstv_demo_cart_c_sha256\n'
+
+if [ -n "$fixture_tools" ]; then
+    if ! { [ -d "$fixture_tools" ] && [ ! -L "$fixture_tools" ]; }; then
+        fail 'fixture_tools.path'
+    fi
+    readelf_cmd=$fixture_tools/readelf
+    file_cmd=$fixture_tools/file
+    if ! { [ -f "$readelf_cmd" ] && [ ! -L "$readelf_cmd" ] && [ -x "$readelf_cmd" ]; }; then
+        fail 'fixture_tools.readelf'
+    fi
+    if ! { [ -f "$file_cmd" ] && [ ! -L "$file_cmd" ] && [ -x "$file_cmd" ]; }; then
+        fail 'fixture_tools.file'
+    fi
+else
+    readelf_cmd=$(command -v readelf 2>/dev/null) || fail 'arm_binary.readelf'
+    file_cmd=$(command -v file 2>/dev/null) || fail 'arm_binary.file'
+fi
+
+if ! elf_header=$("$readelf_cmd" -h "$arm_binary" 2>/dev/null); then
+    fail 'arm_binary.elf_header'
+fi
+case "$elf_header" in
+    *'Class:'*'ELF32'*) ;;
+    *) fail 'arm_binary.class' ;;
+esac
+case "$elf_header" in
+    *'Data:'*'little endian'*) ;;
+    *) fail 'arm_binary.endianness' ;;
+esac
+case "$elf_header" in
+    *'Type:'*'EXEC'*) ;;
+    *) fail 'arm_binary.type' ;;
+esac
+case "$elf_header" in
+    *'Machine:'*'ARM'*) ;;
+    *) fail 'arm_binary.machine' ;;
+esac
+case "$elf_header" in
+    *'Flags:'*'Version5 EABI'*'hard-float ABI'*) ;;
+    *) fail 'arm_binary.abi' ;;
+esac
+if ! elf_program_headers=$("$readelf_cmd" -l "$arm_binary" 2>/dev/null); then
+    fail 'arm_binary.program_headers'
+fi
+case "$elf_program_headers" in
+    *INTERP*) fail 'arm_binary.interpreter' ;;
+    *) ;;
+esac
+if ! elf_dynamic=$("$readelf_cmd" -d "$arm_binary" 2>/dev/null); then
+    fail 'arm_binary.dynamic'
+fi
+case "$elf_dynamic" in
+    *'There is no dynamic section'*) ;;
+    *) fail 'arm_binary.dynamic' ;;
+esac
+if ! file_description=$("$file_cmd" -b "$arm_binary" 2>/dev/null); then
+    fail 'arm_binary.file'
+fi
+case "$file_description" in
+    *'ELF 32-bit LSB executable'*ARM*EABI5*'statically linked'*) ;;
+    *) fail 'arm_binary.file' ;;
+esac
+check_sha256 "$arm_binary" "$(value_from "$baseline" known_good_demo_binary_sha256)" 'arm_binary.sha256'
+printf 'PASS arm_binary.identity\n'
 
 production_outer_commit=$(value_from "$baseline" production_outer_commit)
 production_kernel_gitlink=$(value_from "$baseline" production_kernel_gitlink)

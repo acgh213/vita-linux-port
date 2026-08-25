@@ -93,16 +93,8 @@ attract-mode run.
 ## Hardware verification
 
 Six scenes were explicitly stepped with `SIGUSR1` and read back as six complete
-3,686,400-byte raw framebuffer captures. The fresh, tracked retest evidence is:
-
-- [`HARDWARE-RETEST-20260825.md`](hardware/v0.1/HARDWARE-RETEST-20260825.md)
-  — commands, exact artifact/capture hashes, runtime state, and fault scan.
-- [`hardware-retest-contact-sheet.png`](hardware/v0.1/hardware-retest-contact-sheet.png)
-  — the six-scene RGB contact sheet (raw captures remain in the lab evidence
-  bundle referenced by the report).
-- [`WRAPPER-VALIDATION-20260825.md`](hardware/v0.1/WRAPPER-VALIDATION-20260825.md)
-  — two real-PSTV hardened-wrapper stop/restore/start cycles, including exact
-  wrapper hashes and the corresponding command log.
+3,686,400-byte raw framebuffer captures. Each had a distinct SHA-256. The final
+contact sheet is `hardware-v2-contact-sheet.png`.
 
 Visual QA of the live hardware captures found:
 

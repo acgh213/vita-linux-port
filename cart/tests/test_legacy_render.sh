@@ -34,9 +34,10 @@ assert_sha256() {
 }
 
 assert_sha256 "$CART_DIR/src/pstv-demo-cart.c" 22f4dc5f65a294f01fbb6f96fb99e624e7a7cd86dcd808c7da5dcc1a589240f1
-assert_sha256 "$CART_DIR/scripts/start-demo-cart.sh" 5bf93b22524f16ae95c87c64f7a76443fd4423da64059850b06fcccbbf479a14
-assert_sha256 "$CART_DIR/scripts/stop-demo-cart.sh" 0daae2bf622b4c07f1509a541f8729ace261dfcd7960605ee917fc935e7f28c0
-assert_sha256 "$CART_DIR/README.md" 55f4acb385d4aa047178401d64bdc9a3421829406d40bfc58fbeb9a067d002ab
+assert_sha256 "$CART_DIR/provenance/v0.1/pstv-demo-cart.c" 22f4dc5f65a294f01fbb6f96fb99e624e7a7cd86dcd808c7da5dcc1a589240f1
+assert_sha256 "$CART_DIR/provenance/v0.1/start-demo-cart.sh" 5bf93b22524f16ae95c87c64f7a76443fd4423da64059850b06fcccbbf479a14
+assert_sha256 "$CART_DIR/provenance/v0.1/stop-demo-cart.sh" 0daae2bf622b4c07f1509a541f8729ace261dfcd7960605ee917fc935e7f28c0
+assert_sha256 "$CART_DIR/provenance/v0.1/README.md" 55f4acb385d4aa047178401d64bdc9a3421829406d40bfc58fbeb9a067d002ab
 
 if [ "$VERIFY_ONLY" -eq 0 ]; then
     make -C "$CART_DIR" host-sanitize host-capture

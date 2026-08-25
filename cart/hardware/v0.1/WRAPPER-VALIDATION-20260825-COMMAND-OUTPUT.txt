@@ -1,0 +1,30 @@
+utc=20260825T032934Z
+local_start_sha256=e9697b784f3d1db3fb310d6c6a78ef08b3eb47ef69da2119f989cb92c1fc7c7d
+local_stop_sha256=00e1cf6d70ac8d264b6692c53d813235451ba806eb003299bae4ef5bbd66e0ef
+--- preflight ---
+pid=13355
+online=0-3
+fbcon=0
+cart_sha256=4eee4b0676a546b1d576af8a7f3f97a7ad01d6e9db95a238b3a9ac785fadae0b
+saved_frame_bytes=3686400
+--- cycle_1_stop ---
+stopped /usr/local/bin/pstv-demo-cart (pid 13355)
+PSTV Demo Cart stopped; framebuffer console restored
+after_stop_fbcon=1
+after_stop_online=0-3
+--- cycle_1_start ---
+PSTV Demo Cart running (pid 27578); log: /run/pstv-demo-cart.log
+after_start_pid=27578
+after_start_fbcon=0
+after_start_online=0-3
+--- cycle_2_stop ---
+stopped /usr/local/bin/pstv-demo-cart (pid 27578)
+PSTV Demo Cart stopped; framebuffer console restored
+after_stop_fbcon=1
+after_stop_online=0-3
+--- cycle_2_start ---
+PSTV Demo Cart running (pid 27972); log: /run/pstv-demo-cart.log
+after_start_pid=27972
+after_start_fbcon=0
+after_start_online=0-3
+--- final fault scan ---
