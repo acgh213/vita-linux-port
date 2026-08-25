@@ -3,6 +3,7 @@
 set -eu
 
 SOURCE=
+SOURCE_KIND=
 TARGET=/opt/vita-toolkit
 MACHINE=0
 ACTION=mount
@@ -12,9 +13,10 @@ UMOUNT_CMD=${VITA_TOOLKIT_UMOUNT_CMD:-umount}
 
 usage() {
     printf '%s\n' \
-        'usage: vita-toolkit-mount --device DEVICE [--target DIR] [--machine]' \
+        'usage: vita-toolkit-mount (--device DEVICE | --file IMAGE) [--target DIR] [--machine]' \
         '       vita-toolkit-mount --unmount [--target DIR] [--machine]' \
-        '  --device DEVICE       explicit SquashFS block device or image path' \
+        '  --device DEVICE       explicit SquashFS block device' \
+        '  --file IMAGE          explicit SquashFS image file; uses a loop device' \
         '  --target DIR          mountpoint (default: /opt/vita-toolkit)' \
         '  --unmount             unmount the selected target' \
         '  --machine             stable key=value output'
@@ -58,7 +60,12 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --device)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
-            SOURCE=$2; shift 2 ;;
+            [ -z "$SOURCE_KIND" ] || { usage >&2; exit 2; }
+            SOURCE=$2; SOURCE_KIND=device; shift 2 ;;
+        --file)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            [ -z "$SOURCE_KIND" ] || { usage >&2; exit 2; }
+            SOURCE=$2; SOURCE_KIND=file; shift 2 ;;
         --target)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
             TARGET=$2; shift 2 ;;
@@ -81,24 +88,33 @@ if [ "$ACTION" = unmount ]; then
     exit 0
 fi
 
-[ -n "$SOURCE" ] || fail '--device is required; automatic discovery is disabled'
+[ -n "$SOURCE" ] || fail '--device or --file is required; automatic discovery is disabled'
 valid_path "$SOURCE" || fail "unsafe device or image path: $SOURCE"
-[ -e "$SOURCE" ] || fail "device or image does not exist: $SOURCE"
+if [ "$SOURCE_KIND" = file ]; then
+    [ -f "$SOURCE" ] || fail "SquashFS image file does not exist: $SOURCE"
+else
+    [ -e "$SOURCE" ] || fail "SquashFS device does not exist: $SOURCE"
+fi
 
 if current=$(mounted_source); then
-    [ "$current" = "$SOURCE" ] || fail "target is already mounted from another source: $TARGET"
     report status already_mounted
     report target "$TARGET"
-    report source "$SOURCE"
+    report source "$current"
     exit 0
 fi
 
 mkdir -p "$TARGET" || fail "cannot create mountpoint: $TARGET"
 [ -d "$TARGET" ] || fail "mountpoint is not a directory: $TARGET"
-"$MOUNT_CMD" -t squashfs -o ro,nosuid,nodev "$SOURCE" "$TARGET" || fail "mount failed"
+if [ "$SOURCE_KIND" = file ]; then
+    OPTIONS=loop,ro,nosuid,nodev
+else
+    OPTIONS=ro,nosuid,nodev
+fi
+"$MOUNT_CMD" -t squashfs -o "$OPTIONS" "$SOURCE" "$TARGET" || fail "mount failed"
 
 report status mounted
 report target "$TARGET"
 report source "$SOURCE"
+report source_type "$SOURCE_KIND"
 report filesystem squashfs
-report options ro,nosuid,nodev
+report options "$OPTIONS"
