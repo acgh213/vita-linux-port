@@ -28,11 +28,24 @@ Read-only inventory of the running Linux instance:
 It does not require Python, Lua, curl, or a writable persistent filesystem.
 `VITA_DIAG_ROOT` is a host-test seam; production use leaves it unset.
 
+## Second command: `vita-netdiag`
+
+Read-only network inventory using the image's existing `eth0` and `mlan0`
+conventions:
+
+- interface operational state
+- IPv4 addresses
+- default route and gateway interface
+- configured nameservers
+- optional single bounded ping with explicit `--probe HOST`
+
+Without `--probe`, it does not generate network traffic. It uses stable
+`key=value` output with `--machine`, like `vita-diag`.
+
 ## Planned sequence
 
-1. `vita-diag` — machine identity and baseline evidence.
-2. `vita-net` / `vita-netdiag` — interfaces, DHCP state, route, DNS, gateway
-   RTT, and a bounded throughput probe using tools actually present.
+1. `vita-diag` — machine identity and baseline evidence. **Done.**
+2. `vita-netdiag` — interface state and bounded network diagnostics. **Done.**
 3. `vita-fb` — framebuffer metadata, safe capture/restore, and scene/cart
    ownership checks.
 4. `vita-bench` — NEON/cache/fill-rate measurements, including worker-pool

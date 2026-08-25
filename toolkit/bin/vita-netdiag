@@ -1,0 +1,108 @@
+#!/bin/sh
+# Read-only Vita Linux network inventory. BusyBox/POSIX sh only.
+set -eu
+
+ROOT=${VITA_NETDIAG_ROOT:-/}
+MODE=pretty
+PROBE=
+if [ "${1:-}" = "--machine" ]; then
+    MODE=machine
+    shift
+fi
+if [ "${1:-}" = "--probe" ] && [ -n "${2:-}" ]; then
+    PROBE=$2
+    shift 2
+fi
+if [ "$#" -ne 0 ]; then
+    printf 'usage: %s [--machine] [--probe HOST]\n' "$0" >&2
+    exit 2
+fi
+
+path() {
+    case "$1" in
+        /*) printf '%s%s\n' "$ROOT" "$1" ;;
+        *) printf '%s/%s\n' "$ROOT" "$1" ;;
+    esac
+}
+
+get_file() {
+    file=$(path "$1")
+    if [ -r "$file" ]; then
+        tr '\n' ' ' < "$file" | sed 's/[[:space:]][[:space:]]*/ /g; s/[[:space:]]*$//'
+    else
+        printf 'UNKNOWN'
+    fi
+}
+
+interfaces=UNKNOWN
+net_root=$(path /sys/class/net)
+if [ -d "$net_root" ]; then
+    interfaces=
+    for entry in "$net_root"/*; do
+        [ -e "$entry" ] || continue
+        name=${entry##*/}
+        state=$(get_file "/sys/class/net/$name/operstate")
+        [ -n "$interfaces" ] && interfaces="$interfaces,$name:$state" || interfaces="$name:$state"
+    done
+    [ -n "$interfaces" ] || interfaces=UNKNOWN
+fi
+
+if [ -n "${VITA_NETDIAG_ADDR:-}" ]; then
+    addresses=$VITA_NETDIAG_ADDR
+elif command -v ip >/dev/null 2>&1; then
+    addresses=$(ip -o -4 addr show scope global 2>/dev/null |
+        awk '{print $2 ":" $4}' | tr '\n' ',' | sed 's/,$//')
+    [ -n "$addresses" ] || addresses=UNKNOWN
+else
+    addresses=UNKNOWN
+fi
+
+if [ -n "${VITA_NETDIAG_ROUTE:-}" ]; then
+    default_route=$VITA_NETDIAG_ROUTE
+elif command -v ip >/dev/null 2>&1; then
+    default_route=$(ip route show default 2>/dev/null |
+        awk '$1 == "default" {print $3 ":" $5; exit}')
+    [ -n "$default_route" ] || default_route=UNKNOWN
+else
+    default_route=UNKNOWN
+fi
+
+resolv=$(path /etc/resolv.conf)
+nameservers=UNKNOWN
+if [ -r "$resolv" ]; then
+    nameservers=$(awk '$1 == "nameserver" {print $2}' "$resolv" |
+        tr '\n' ',' | sed 's/,$//')
+    [ -n "$nameservers" ] || nameservers=UNKNOWN
+fi
+
+probe_status=not_requested
+probe_rtt_ms=UNKNOWN
+if [ -n "$PROBE" ]; then
+    if ! command -v ping >/dev/null 2>&1; then
+        probe_status=unavailable
+    elif ping_output=$(ping -c 1 -W 1 "$PROBE" 2>&1); then
+        probe_status=ok
+        probe_rtt_ms=$(printf '%s\n' "$ping_output" |
+            sed -n 's/.*time=\([0-9.][0-9.]*\) ms.*/\1/p' | head -1)
+        [ -n "$probe_rtt_ms" ] || probe_rtt_ms=UNKNOWN
+    else
+        probe_status=failed
+    fi
+fi
+
+if [ "$MODE" = machine ]; then
+    printf 'schema=1\ninterfaces=%s\naddresses=%s\n' "$interfaces" "$addresses"
+    printf 'default_route=%s\nnameservers=%s\n' "$default_route" "$nameservers"
+    printf 'probe_host=%s\nprobe_status=%s\nprobe_rtt_ms=%s\n' \
+        "${PROBE:-NONE}" "$probe_status" "$probe_rtt_ms"
+    exit 0
+fi
+
+printf 'Vita Linux network diagnostics\n'
+printf '  interfaces:    %s\n  addresses:     %s\n' "$interfaces" "$addresses"
+printf '  default route: %s\n  nameservers:    %s\n' "$default_route" "$nameservers"
+if [ -n "$PROBE" ]; then
+    printf '  probe:         %s (%s, %s ms)\n' "$PROBE" "$probe_status" "$probe_rtt_ms"
+else
+    printf '  probe:         not requested\n'
+fi
