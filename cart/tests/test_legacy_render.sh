@@ -33,7 +33,6 @@ assert_sha256() {
     [ "$actual" = "$expected" ] || fail "$file sha256 ($actual != $expected)"
 }
 
-assert_sha256 "$CART_DIR/src/pstv-demo-cart.c" 22f4dc5f65a294f01fbb6f96fb99e624e7a7cd86dcd808c7da5dcc1a589240f1
 assert_sha256 "$CART_DIR/provenance/v0.1/pstv-demo-cart.c" 22f4dc5f65a294f01fbb6f96fb99e624e7a7cd86dcd808c7da5dcc1a589240f1
 assert_sha256 "$CART_DIR/provenance/v0.1/start-demo-cart.sh" 5bf93b22524f16ae95c87c64f7a76443fd4423da64059850b06fcccbbf479a14
 assert_sha256 "$CART_DIR/provenance/v0.1/stop-demo-cart.sh" 0daae2bf622b4c07f1509a541f8729ace261dfcd7960605ee917fc935e7f28c0

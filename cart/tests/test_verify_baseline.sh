@@ -228,6 +228,9 @@ ARM_BINARY=$FIXTURE/non-arm-binary
 run_fail 'non-ARM binary is rejected' 'FAIL arm_binary.machine' \
     "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
 ARM_BINARY=$SAVED_ARM_BINARY
+printf 'active behavior-preserving refactor\n' >>"$CART/src/pstv-demo-cart.c"
+run_ok 'active refactor source is allowed while v0.1 remains frozen' \
+    "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction
 printf 'mutated frozen renderer\n' >>"$FROZEN/pstv-demo-cart.c"
 run_fail 'mutated frozen renderer is rejected' 'FAIL provenance.v0_1.pstv_demo_cart_c_sha256' \
     "$VERIFIER" --repo "$OUTER" --baseline "$BASELINE" --expected "$EXPECTED" --allow-nonproduction

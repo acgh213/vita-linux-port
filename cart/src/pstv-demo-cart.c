@@ -1,4 +1,6 @@
 #define _GNU_SOURCE
+#include <cart/canvas.h>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fb.h>
@@ -27,6 +29,12 @@
 static volatile sig_atomic_t running = 1;
 static volatile sig_atomic_t next_scene_requested = 0;
 static uint32_t low[LW * LH];
+static struct cart_canvas low_canvas = {
+    .pixels = low,
+    .width = LW,
+    .height = LH,
+    .stride = LW,
+};
 static float sins[2048];
 static int scene = 0;
 static int frame_no = 0;
@@ -46,13 +54,7 @@ static const uint32_t PAL[] = {
 
 static inline uint32_t rgba(int r, int g, int b)
 {
-    if (r < 0) r = 0;
-    if (r > 255) r = 255;
-    if (g < 0) g = 0;
-    if (g > 255) g = 255;
-    if (b < 0) b = 0;
-    if (b > 255) b = 255;
-    return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | 0xff000000u;
+    return cart_rgba(r, g, b);
 }
 
 static inline int si(int x)
@@ -62,32 +64,22 @@ static inline int si(int x)
 
 static inline uint32_t mix(uint32_t a, uint32_t b, int t)
 {
-    int ar = a & 255, ag = (a >> 8) & 255, ab = (a >> 16) & 255;
-    int br = b & 255, bg = (b >> 8) & 255, bb = (b >> 16) & 255;
-    return rgba(ar + ((br - ar) * t >> 8),
-                ag + ((bg - ag) * t >> 8),
-                ab + ((bb - ab) * t >> 8));
+    return cart_mix(a, b, t < 0 ? 0U : (unsigned int)t);
 }
 
 static inline void px(int x, int y, uint32_t c)
 {
-    if ((unsigned)x < LW && (unsigned)y < LH) low[y * LW + x] = c;
+    cart_canvas_px(&low_canvas, x, y, c);
 }
 
 static void rect(int x, int y, int w, int h, uint32_t c)
 {
-    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
-    int x1 = x + w > LW ? LW : x + w, y1 = y + h > LH ? LH : y + h;
-    for (int yy = y0; yy < y1; yy++)
-        for (int xx = x0; xx < x1; xx++) low[yy * LW + xx] = c;
+    cart_canvas_rect(&low_canvas, x, y, w, h, c);
 }
 
 static void circle(int cx, int cy, int r, uint32_t c)
 {
-    int rr = r * r;
-    for (int y = -r; y <= r; y++)
-        for (int x = -r; x <= r; x++)
-            if (x*x + y*y <= rr) px(cx+x, cy+y, c);
+    cart_canvas_circle(&low_canvas, cx, cy, r, c);
 }
 
 static void heart(int cx, int cy, int s, uint32_t c, uint32_t edge)
