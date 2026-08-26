@@ -1,0 +1,113 @@
+#!/bin/sh
+# Inventory removable storage without mounting or writing.
+set -eu
+
+SYSFS_ROOT=${VITA_STORAGE_SYSFS_ROOT:-/sys}
+DEV_ROOT=${VITA_STORAGE_DEV_ROOT:-/dev}
+PROC_MOUNTS=${VITA_STORAGE_PROC_MOUNTS:-/proc/mounts}
+BLKID_CMD=${VITA_STORAGE_BLKID_CMD:-blkid}
+MODE=pretty
+
+usage() {
+    printf '%s\n' \
+        'usage: vita-storage [--machine]' \
+        '  --machine    stable key=value output'
+}
+
+if [ "${1:-}" = '--machine' ]; then
+    MODE=machine
+    shift
+fi
+[ "$#" -eq 0 ] || { usage >&2; exit 2; }
+[ -d "$SYSFS_ROOT/class/block" ] || { printf 'vita-storage: missing sysfs block root: %s\n' "$SYSFS_ROOT/class/block" >&2; exit 1; }
+[ -r "$PROC_MOUNTS" ] || { printf 'vita-storage: cannot read mount table: %s\n' "$PROC_MOUNTS" >&2; exit 1; }
+
+records=
+count=0
+
+for partition in "$SYSFS_ROOT"/class/block/*/partition; do
+    [ -f "$partition" ] || continue
+    name=${partition%/partition}
+    name=${name##*/}
+    class_entry="$SYSFS_ROOT/class/block/$name"
+    real_entry=$(readlink -f "$class_entry" 2>/dev/null || true)
+    [ -n "$real_entry" ] || continue
+    parent=${real_entry%/*}
+    parent=${parent##*/}
+    removable_file="$SYSFS_ROOT/class/block/$parent/removable"
+    removable=$(tr -d '[:space:]' < "$removable_file" 2>/dev/null || true)
+    [ "$removable" = 1 ] || continue
+
+    device="/dev/$name"
+    device_path="$DEV_ROOT/$name"
+    [ -e "$device_path" ] || continue
+    info=$($BLKID_CMD "$device_path" 2>/dev/null || true)
+    filesystem=$(printf '%s\n' "$info" | sed -n 's/.*TYPE="\([^"]*\)".*/\1/p')
+    label=$(printf '%s\n' "$info" | sed -n 's/.*LABEL="\([^"]*\)".*/\1/p')
+    uuid=$(printf '%s\n' "$info" | sed -n 's/.*UUID="\([^"]*\)".*/\1/p')
+    [ -n "$filesystem" ] || filesystem=UNKNOWN
+    [ -n "$label" ] || label=UNKNOWN
+    [ -n "$uuid" ] || uuid=UNKNOWN
+
+    mountpoint=$(awk -v device="$device" '$1 == device { print $2; exit }' "$PROC_MOUNTS")
+    if [ -n "$mountpoint" ]; then
+        mounted=1
+    else
+        mounted=0
+        mountpoint=NONE
+    fi
+
+    record="$device|/dev/$parent|$removable|$filesystem|$label|$uuid|$mounted|$mountpoint"
+    if [ -n "$records" ]; then
+        records="$records
+$record"
+    else
+        records=$record
+    fi
+    count=$((count + 1))
+done
+
+print_record() {
+    record=$1
+    old_ifs=$IFS
+    IFS='|'
+    set -- $record
+    IFS=$old_ifs
+    device=$1
+    parent=$2
+    removable=$3
+    filesystem=$4
+    label=$5
+    uuid=$6
+    mounted=$7
+    mountpoint=$8
+    if [ "$MODE" = machine ]; then
+        printf 'storage_%s_device=%s\nstorage_%s_parent=%s\nstorage_%s_removable=%s\n' \
+            "$index" "$device" "$index" "$parent" "$index" "$removable"
+        printf 'storage_%s_filesystem=%s\nstorage_%s_label=%s\nstorage_%s_uuid=%s\n' \
+            "$index" "$filesystem" "$index" "$label" "$index" "$uuid"
+        printf 'storage_%s_mounted=%s\nstorage_%s_mountpoint=%s\n' \
+            "$index" "$mounted" "$index" "$mountpoint"
+    else
+        printf '  device:      %s\n  parent:      %s\n  removable:   %s\n  filesystem:  %s\n  label:       %s\n  uuid:        %s\n  mounted:     %s\n  mountpoint:  %s\n' \
+            "$device" "$parent" "$removable" "$filesystem" "$label" "$uuid" "$mounted" "$mountpoint"
+    fi
+}
+
+if [ "$MODE" = machine ]; then
+    printf 'schema=1\nstorage_count=%s\n' "$count"
+else
+    printf 'Removable storage: %s\n' "$count"
+fi
+
+index=1
+if [ -n "$records" ]; then
+    old_ifs=$IFS
+    IFS='
+'
+    for record in $records; do
+        print_record "$record"
+        index=$((index + 1))
+    done
+    IFS=$old_ifs
+fi

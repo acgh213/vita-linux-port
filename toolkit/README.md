@@ -76,6 +76,36 @@ Storage is mounted read-only as exFAT; the SquashFS image uses a read-only loop
 mount with `nosuid,nodev`. The helper refuses system directories and reports
 stable status fields for scripts.
 
+## Third command: `vita-storage`
+
+`vita-storage` inventories removable partitions without mounting, formatting,
+partitioning, or writing to them. It identifies partitions through sysfs and
+requires the parent disk's `removable` flag; it does not assume `/dev/sda*`,
+`/dev/sdb*`, or any other enumeration order. Filesystem metadata comes from
+`blkid`, and mount state is read from `/proc/mounts`.
+
+```sh
+vita-storage --machine
+```
+
+Machine output uses one record per removable partition:
+
+```text
+schema=1
+storage_count=1
+storage_1_device=/dev/sdb1
+storage_1_parent=/dev/sdb
+storage_1_removable=1
+storage_1_filesystem=exfat
+storage_1_label=New Volume
+storage_1_uuid=806A-41E2
+storage_1_mounted=0
+storage_1_mountpoint=NONE
+```
+
+The displayed device name is informational. Any later mount operation must
+still be explicit and separately reviewed.
+
 ## Second command: `vita-netdiag`
 
 Read-only network inventory using the image's existing `eth0` and `mlan0`
@@ -94,11 +124,13 @@ Without `--probe`, it does not generate network traffic. It uses stable
 
 1. `vita-diag` — machine identity and baseline evidence. **Done.**
 2. `vita-netdiag` — interface state and bounded network diagnostics. **Done.**
-3. `vita-fb` — framebuffer metadata, safe capture/restore, and scene/cart
+3. `vita-toolkit-mount` — explicit read-only SquashFS payload mounting. **Done.**
+4. `vita-storage` — removable storage inventory without writes. **Done.**
+5. `vita-fb` — framebuffer metadata, safe capture/restore, and scene/cart
    ownership checks.
-4. `vita-bench` — NEON/cache/fill-rate measurements, including worker-pool
+6. `vita-bench` — NEON/cache/fill-rate measurements, including worker-pool
    scaling once the benchmark contract is settled.
-5. `vita-control` — a deliberately small local/network control surface for
+7. `vita-control` — a deliberately small local/network control surface for
    demos, with explicit read-only and mutating modes.
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
