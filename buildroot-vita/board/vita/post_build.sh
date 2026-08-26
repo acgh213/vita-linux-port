@@ -23,5 +23,6 @@ chmod 711 "${TARGET_DIR}/var/empty"
 for key in "${TARGET_DIR}"/etc/ssh/ssh_host_*_key; do
     [ -f "$key" ] && chmod 600 "$key"
 done
-[ -f "${TARGET_DIR}/root/.ssh/authorized_keys" ] && \
+if [ -f "${TARGET_DIR}/root/.ssh/authorized_keys" ]; then
     chmod 600 "${TARGET_DIR}/root/.ssh/authorized_keys"
+fi
