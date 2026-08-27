@@ -113,6 +113,36 @@ Relative to `0xE3101000` (reset) or `0xE3102000` (gate):
 | 4 | D+ | |
 | 5 | VBUS | 3.3V (not 5V!) |
 
+## UART Access (Linux console — UART0)
+
+**UART0 is the ARM SoC debug console** used by ARM, cMep, and Syscon. This is the
+port the Linux port uses as `ttyS0` (115200 8N1). **Logic level is 1.8V** — a
+plain 3.3V FTDI adapter will NOT work; use a 1.8V-capable adapter (e.g. Tigard,
+which `serial_log.py` auto-detects).
+
+Two access routes on PCH-1XXX:
+
+1. **Testpads near the PMIC** (yellow/cyan points in the HENkaku wiki image
+   `Vita-1000-uart.png`) — direct UART0, no mux, always available. **Recommended.**
+2. **Multi-connector pins 6 (RX), 7 (TX), 8 (CTS), 9 (RTS)** — UART0 is behind a
+   TS3A5018 analog switch here. It only reaches the connector if the switch is
+   flipped: either call `sceSysconSetMultiCnPortForDriver(1)` from a kernel
+   plugin, or manually pull the switch testpoint (green point) to 1.8V. The
+   RTS gate is a TC7WG126FK.
+
+The baremetal loader (`vita-baremetal-linux-loader`) initializes UART0
+(`pervasive_clock_enable_uart(0)`, `uart_init(0, 115200)`) but does **not** flip
+the multi-connector mux. Sourcing a populated multi-connector plug is the hard
+part (PCH-ZCL1 cradle is the known donor; retail USB cables only wire the USB
+pins).
+
+**Do not confuse UART0 with the Syscon RPC UART** (SKGleba's `bert` project):
+that is Ernie's debug/RPC interface, also 1.8V on multi-connector pins 6/7, but
+it requires a jig circuit (Jig Sense 1 at 0.47–0.738V during Jig Sense 2 state
+change) and speaks the bert packet protocol — it is not the Linux console.
+
+Sources: https://wiki.henkaku.xyz/vita/UART_Console, https://consolemods.org/wiki/Vita:Connector_Pinouts, https://github.com/SKGleba/bert
+
 ## SDIF (SD Host Controller) — Most Promising for Networking
 
 All 4 SDIF controllers use **standard SDHCI** register layout. Base clock: 48 MHz.
