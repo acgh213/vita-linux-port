@@ -16,6 +16,7 @@ CANVAS_TEST_BIN := $(BUILD_DIR)/test-canvas
 SCENE_REGISTRY_TEST_BIN := $(BUILD_DIR)/test-scene-registry
 RUNTIME_TEST_BIN := $(BUILD_DIR)/test-runtime
 INPUT_TEST_BIN := $(BUILD_DIR)/test-input
+INPUT_ACTIONS_TEST_BIN := $(BUILD_DIR)/test-input-actions
 WORKER_POOL_TEST_BIN := $(BUILD_DIR)/test-worker-pool
 CAPTURE_SRC := $(BUILD_DIR)/capture-host.c
 CAPTURE_BIN := $(BUILD_DIR)/capture-host
@@ -32,7 +33,7 @@ TARGET_BIN := $(BUILD_DIR)/pstv-demo-cart.arm
 PRODUCTION_SRC := $(CART_DIR)/provenance/v0.1/pstv-demo-cart.c
 PRODUCTION_BIN := $(BUILD_DIR)/pstv-demo-cart.v0.1.arm
 
-.PHONY: all host-sanitize test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-worker-pool host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
+.PHONY: all host-sanitize test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-worker-pool host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
 
 FORCE:
 
@@ -56,6 +57,9 @@ test-runtime: $(RUNTIME_TEST_BIN)
 test-input: $(INPUT_TEST_BIN)
 	"$(INPUT_TEST_BIN)"
 
+test-input-actions: $(INPUT_ACTIONS_TEST_BIN)
+	"$(INPUT_ACTIONS_TEST_BIN)"
+
 test-worker-pool: $(WORKER_POOL_TEST_BIN)
 	"$(WORKER_POOL_TEST_BIN)"
 
@@ -69,6 +73,10 @@ $(RUNTIME_TEST_BIN): $(CART_DIR)/tests/test_runtime.c $(RUNTIME_SRC) $(CART_DIR)
 $(INPUT_TEST_BIN): $(CART_DIR)/tests/test_input.c $(INPUT_SRC) $(CART_DIR)/include/cart/input.h FORCE
 	@mkdir -p "$(BUILD_DIR)"
 	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_input.c" "$(INPUT_SRC)" $(HOST_LDFLAGS) -o "$@"
+
+$(INPUT_ACTIONS_TEST_BIN): $(CART_DIR)/tests/test_input_actions.c $(CART_DIR)/src/input_actions.c $(CART_DIR)/include/cart/input_actions.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_input_actions.c" "$(CART_DIR)/src/input_actions.c" $(HOST_LDFLAGS) -o "$@"
 
 $(WORKER_POOL_TEST_BIN): $(CART_DIR)/tests/test_worker_pool.c $(WORKER_POOL_SRC) $(CART_DIR)/include/cart/worker_pool.h FORCE
 	@mkdir -p "$(BUILD_DIR)"
@@ -220,7 +228,7 @@ cross-verify: cross-build
 	@readelf -h "$(TARGET_BIN)" | grep -q 'Flags:.*hard-float ABI'
 	@if readelf -l "$(TARGET_BIN)" | grep -q 'INTERP'; then printf '%s\n' 'FAIL cross-verify: dynamic interpreter present' >&2; exit 1; fi
 
-test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-worker-pool host-sanitize host-capture
+test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-worker-pool host-sanitize host-capture
 	"$(SHELL)" "$(CART_DIR)/tests/test_legacy_render.sh" --verify-only --compare-to "$(GENERATED_FIXTURES)"
 	@if [ "$${CART_IMMUTABILITY_GUARD:-}" != child ] && [ -z "$${CART_SKIP_IMMUTABILITY:-}" ]; then \
 		CART_IMMUTABILITY_GUARD=child CART_SKIP_IMMUTABILITY=1 \
