@@ -87,3 +87,20 @@ void cart_runtime_request_next(struct cart_runtime *runtime, uint64_t now_ns,
     runtime->manual_hold_until_ns = add_saturating(now_ns, hold_ns);
     runtime->manual_hold_active = 1;
 }
+
+void cart_runtime_request_previous(struct cart_runtime *runtime, uint64_t now_ns,
+                                   uint64_t hold_ns)
+{
+    if (runtime == NULL || runtime->scene_count == 0)
+        return;
+
+    runtime->manual_scene_index = (runtime->scene_index + runtime->scene_count - 1) %
+                                  runtime->scene_count;
+    runtime->scene_index = runtime->manual_scene_index;
+    if (hold_ns == 0) {
+        runtime->manual_hold_active = 0;
+        return;
+    }
+    runtime->manual_hold_until_ns = add_saturating(now_ns, hold_ns);
+    runtime->manual_hold_active = 1;
+}

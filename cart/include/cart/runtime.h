@@ -25,5 +25,7 @@ int cart_runtime_init(struct cart_runtime *runtime, size_t scene_count,
 int cart_runtime_tick(struct cart_runtime *runtime, uint64_t now_ns);
 void cart_runtime_request_next(struct cart_runtime *runtime, uint64_t now_ns,
                                uint64_t hold_ns);
+void cart_runtime_request_previous(struct cart_runtime *runtime, uint64_t now_ns,
+                                   uint64_t hold_ns);
 
 #endif
