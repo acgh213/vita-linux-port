@@ -165,17 +165,16 @@ int main(int argc,char **argv)
     if(ioctl(fd,FBIOGET_VSCREENINFO,&v)||ioctl(fd,FBIOGET_FSCREENINFO,&fix)){perror("fb ioctl");return 1;}
     if(v.xres!=FW||v.yres!=FH||v.bits_per_pixel!=32||fix.line_length!=FW*4){fprintf(stderr,"unexpected fb %ux%u %ubpp stride %u\n",v.xres,v.yres,v.bits_per_pixel,fix.line_length);return 1;}
     uint32_t *fb=mmap(NULL,FW*FH*4,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0); if(fb==MAP_FAILED){perror("mmap");return 1;}
-    struct cart_input input = { .fd = -1 };
-    int input_status = cart_input_discover(&input, "/sys/class/input",
-                                           "/dev/input");
-    if (input_status < 0)
+    struct cart_input input;
+    if (cart_input_init(&input, "/sys/class/input", "/dev/input") < 0)
         perror("input discovery");
-    else if (input_status > 0)
-        fprintf(stderr, "input=%s name=%s\n", input.path, input.name);
+    else if (input.source[0].fd >= 0 || input.source[1].fd >= 0 ||
+             input.source[2].fd >= 0 || input.source[3].fd >= 0)
+        fprintf(stderr, "input sources connected\n");
     uint64_t now_ns;
     if (monotonic_now_ns(&now_ns) != 0) {
         perror("clock_gettime");
-        cart_input_close(&input);
+        cart_input_shutdown(&input);
         munmap(fb, FW * FH * 4);
         close(fd);
         return 1;
@@ -185,7 +184,7 @@ int main(int argc,char **argv)
         row_slots[index] = &row_contexts[index];
     if (cart_worker_pool_init(&render_pool, RENDER_THREADS, LH) != 0) {
         fprintf(stderr, "worker pool initialization failed\n");
-        cart_input_close(&input);
+        cart_input_shutdown(&input);
         munmap(fb, FW * FH * 4);
         close(fd);
         return 1;
@@ -194,7 +193,7 @@ int main(int argc,char **argv)
                           UINT64_C(1000000000) / FPS,
                           UINT64_C(8) * UINT64_C(1000000000)) != 0) {
         fprintf(stderr, "runtime initialization failed\n");
-        cart_input_close(&input);
+        cart_input_shutdown(&input);
         munmap(fb, FW * FH * 4);
         close(fd);
         return 1;
@@ -217,16 +216,20 @@ int main(int argc,char **argv)
             next_scene_requested=0;
         }
         {
-            enum cart_input_action action;
+            enum cart_input_action polled = CART_INPUT_NONE;
+            struct cart_input_frame frame;
 
-            if (cart_input_poll(&input, &action) != 0) {
+            if (cart_input_poll(&input, &polled, &frame) != 0) {
                 perror("input poll");
-                cart_input_close(&input);
-            } else if (action == CART_INPUT_QUIT) {
+                cart_input_shutdown(&input);
+            } else if (polled == CART_INPUT_QUIT) {
                 running = 0;
-            } else if (action == CART_INPUT_NEXT) {
+            } else if (polled == CART_INPUT_NEXT) {
                 cart_runtime_request_next(&runtime, now_ns,
                                            UINT64_C(8) * UINT64_C(1000000000));
+            } else if (polled == CART_INPUT_PREVIOUS) {
+                cart_runtime_request_previous(&runtime, now_ns,
+                                               UINT64_C(8) * UINT64_C(1000000000));
             }
         }
         render_frame((int)runtime.scene_index, runtime.frame); upscale(fb); rendered_frames++;
@@ -257,7 +260,7 @@ int main(int argc,char **argv)
         }
     }
     cart_worker_pool_shutdown(&render_pool);
-    cart_input_close(&input);
+    cart_input_shutdown(&input);
     munmap(fb,FW*FH*4);
     close(fd);
     return 0;

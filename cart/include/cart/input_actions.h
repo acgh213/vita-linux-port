@@ -3,15 +3,13 @@
 
 #include <stdint.h>
 
-/* Parallel action constants for the pure evdev key->action decoder.
+/* Shared action vocabulary for the whole input stack.
  *
- * These mirror the six-action ordering that cart/input.h owns
- * (CART_INPUT_NONE=0, NEXT, PREVIOUS, SELECT, BACK, MENU, QUIT) so the
- * values stay binary-compatible when the decoder is wired into the full
- * input stack. This header is deliberately standalone: it must never
- * include or redefine cart/input.h.
+ * Owned here (input_actions.h) since the evdev decoder, the lifecycle
+ * engine, and the runtime all consume it; cart/input.h includes this
+ * header rather than redefining it. Values are ABI: do not reorder.
  */
-enum {
+enum cart_input_action {
     CART_INPUT_NONE = 0,
     CART_INPUT_NEXT = 1,
     CART_INPUT_PREVIOUS = 2,
