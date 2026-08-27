@@ -236,7 +236,7 @@ cross-verify: cross-build
 	@readelf -h "$(TARGET_BIN)" | grep -q 'Flags:.*hard-float ABI'
 	@if readelf -l "$(TARGET_BIN)" | grep -q 'INTERP'; then printf '%s\n' 'FAIL cross-verify: dynamic interpreter present' >&2; exit 1; fi
 
-test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-worker-pool host-sanitize host-capture
+test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-input-normalize test-worker-pool host-sanitize host-capture
 	"$(SHELL)" "$(CART_DIR)/tests/test_legacy_render.sh" --verify-only --compare-to "$(GENERATED_FIXTURES)"
 	@if [ "$${CART_IMMUTABILITY_GUARD:-}" != child ] && [ -z "$${CART_SKIP_IMMUTABILITY:-}" ]; then \
 		CART_IMMUTABILITY_GUARD=child CART_SKIP_IMMUTABILITY=1 \
