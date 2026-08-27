@@ -3,6 +3,7 @@ refs/
 refs
 
 # Built artifacts
+/cart/build/
 *.o
 zImage
 *.dtb
