@@ -17,6 +17,7 @@ SCENE_REGISTRY_TEST_BIN := $(BUILD_DIR)/test-scene-registry
 RUNTIME_TEST_BIN := $(BUILD_DIR)/test-runtime
 INPUT_TEST_BIN := $(BUILD_DIR)/test-input
 INPUT_ACTIONS_TEST_BIN := $(BUILD_DIR)/test-input-actions
+INPUT_NORMALIZE_TEST_BIN := $(BUILD_DIR)/test-input-normalize
 WORKER_POOL_TEST_BIN := $(BUILD_DIR)/test-worker-pool
 CAPTURE_SRC := $(BUILD_DIR)/capture-host.c
 CAPTURE_BIN := $(BUILD_DIR)/capture-host
@@ -60,6 +61,9 @@ test-input: $(INPUT_TEST_BIN)
 test-input-actions: $(INPUT_ACTIONS_TEST_BIN)
 	"$(INPUT_ACTIONS_TEST_BIN)"
 
+test-input-normalize: $(INPUT_NORMALIZE_TEST_BIN)
+	"$(INPUT_NORMALIZE_TEST_BIN)"
+
 test-worker-pool: $(WORKER_POOL_TEST_BIN)
 	"$(WORKER_POOL_TEST_BIN)"
 
@@ -77,6 +81,10 @@ $(INPUT_TEST_BIN): $(CART_DIR)/tests/test_input.c $(INPUT_SRC) $(CART_DIR)/inclu
 $(INPUT_ACTIONS_TEST_BIN): $(CART_DIR)/tests/test_input_actions.c $(CART_DIR)/src/input_actions.c $(CART_DIR)/include/cart/input_actions.h FORCE
 	@mkdir -p "$(BUILD_DIR)"
 	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_input_actions.c" "$(CART_DIR)/src/input_actions.c" $(HOST_LDFLAGS) -o "$@"
+
+$(INPUT_NORMALIZE_TEST_BIN): $(CART_DIR)/tests/test_input_normalize.c $(CART_DIR)/src/input_normalize.c $(CART_DIR)/include/cart/input_normalize.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_input_normalize.c" "$(CART_DIR)/src/input_normalize.c" $(HOST_LDFLAGS) -o "$@"
 
 $(WORKER_POOL_TEST_BIN): $(CART_DIR)/tests/test_worker_pool.c $(WORKER_POOL_SRC) $(CART_DIR)/include/cart/worker_pool.h FORCE
 	@mkdir -p "$(BUILD_DIR)"
