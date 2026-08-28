@@ -46,7 +46,7 @@ all: host-sanitize
 
 host-sanitize: $(HOST_BIN)
 
-$(HOST_BIN): FORCE $(SRCS)
+$(HOST_BIN): $(SRC) FORCE $(SRCS)
 	@mkdir -p "$(BUILD_DIR)"
 	"$(CC)" $(HOST_CFLAGS) $(SRCS) $(HOST_LDFLAGS) -pthread -lm -o "$@"
 
@@ -110,7 +110,7 @@ $(CANVAS_TEST_BIN): $(CART_DIR)/tests/test_canvas.c $(CANVAS_SRC) $(CART_DIR)/in
 	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_canvas.c" "$(CANVAS_SRC)" $(HOST_LDFLAGS) -o "$@"
 
 ifeq ($(CAPTURE_SRC),$(DEFAULT_CAPTURE_SRC))
-$(CAPTURE_SRC): FORCE $(SRCS)
+$(CAPTURE_SRC): $(SRC) FORCE $(SRCS)
 	@mkdir -p "$(BUILD_DIR)"
 	@printf '%s\n' '#define _GNU_SOURCE' '#define main pstv_demo_cart_production_main' '#include "../src/canvas.c"' '#include "../src/runtime.c"' '#include "../src/input_evdev.c"' '#include "../src/input_normalize.c"' '#include "../src/input_actions.c"' '#include "../src/worker_pool.c"' '#include "../src/transition.c"' '#include "../scenes/scene_2d_legacy.c"' '#include "../src/scenes_builtin.c"' '#include "../src/pstv-demo-cart.c"' '#undef main' '#include <stdint.h>' '#include <stdio.h>' '#include <stdlib.h>' '' 'static int dump_logical(const char *path)' '{' '    FILE *f = fopen(path, "wb");' '    if (!f) { perror(path); return 1; }' '    if (fprintf(f, "P6\n%d %d\n255\n", LW, LH) < 0) { fclose(f); return 1; }' '    for (int y = 0; y < LH; y++)' '        for (int x = 0; x < LW; x++) {' '            uint32_t c = low[y * LW + x];' '            uint8_t p[3] = { c & 255, (c >> 8) & 255, (c >> 16) & 255 };' '            if (fwrite(p, 1, sizeof(p), f) != sizeof(p)) { fclose(f); return 1; }' '        }' '    return fclose(f) != 0;' '}' 'int main(int argc, char **argv)' '{' '    if (argc != 4) { fprintf(stderr, "usage: %s SCENE FRAME OUTPUT\n", argv[0]); return 2; }' '    if (cart_scenes_init() != 0) { return 1; }' '    render_frame(atoi(argv[1]) % SCENES, atoi(argv[2]));' '    return dump_logical(argv[3]);' '}' > "$@"
 
