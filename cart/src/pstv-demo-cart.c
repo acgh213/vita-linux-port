@@ -3,6 +3,7 @@
 #include <cart/input.h>
 #include <cart/runtime.h>
 #include <cart/scene.h>
+#include <cart/transition.h>
 #include <cart/worker_pool.h>
 
 #include <errno.h>
@@ -45,6 +46,15 @@ static struct cart_scene_render_context row_contexts[CART_WORKER_POOL_MAX];
 static void *row_slots[CART_WORKER_POOL_MAX];
 static const struct cart_scene *row_scene;
 static struct cart_worker_pool render_pool;
+
+/* Crossfade staging. Scene changes are never hard cuts: the outgoing and
+ * incoming scenes are rendered into these buffers and blended into `low`
+ * over CART_TRANSITION_FRAMES. See
+ * docs/plans/2026-08-27-pstv-transition-flash-repair.md. */
+static uint32_t low_from[LW * LH];
+static uint32_t low_to[LW * LH];
+static struct cart_transition transition;
+static size_t displayed_scene;
 
 static void row_job(void *slot, int row_start, int row_end, uint64_t frame)
 {
@@ -89,6 +99,19 @@ static void render_frame(int which, uint64_t frame)
         .phase = CART_SCENE_RENDER_OVERLAY,
     };
     selected->render(&overlay_context);
+}
+
+/* Render a specific scene into a specific buffer. render_frame() binds every
+ * active context to &low_canvas at dispatch time, so retargeting the canvas
+ * pixel pointer around the call redirects the whole pipeline, workers
+ * included. */
+static void render_scene_into(uint32_t *destination, int which, uint64_t frame)
+{
+    uint32_t *saved = low_canvas.pixels;
+
+    low_canvas.pixels = destination;
+    render_frame(which, frame);
+    low_canvas.pixels = saved;
 }
 
 static void upscale(uint32_t *dst)
@@ -199,6 +222,8 @@ int main(int argc,char **argv)
         close(fd);
         return 1;
     }
+    displayed_scene = runtime.scene_index;
+    memset(&transition, 0, sizeof(transition));
     uint64_t report_start_ns=now_ns;
     uint64_t report_frame=0;
     uint64_t rendered_frames=0;
@@ -233,7 +258,30 @@ int main(int argc,char **argv)
                                                UINT64_C(8) * UINT64_C(1000000000));
             }
         }
-        render_frame((int)runtime.scene_index, runtime.frame); upscale(fb); rendered_frames++;
+        /* Begin a fade whenever the runtime selects a different scene.
+         * A fade already in flight is never interrupted — the rate limiter
+         * in cart_runtime guarantees the next change cannot arrive before
+         * this one completes. */
+        if (runtime.scene_index != displayed_scene &&
+            !cart_transition_active(&transition))
+            cart_transition_begin(&transition, displayed_scene,
+                                  runtime.scene_index);
+        if (cart_transition_active(&transition)) {
+            render_scene_into(low_from, (int)transition.from_scene,
+                              runtime.frame);
+            render_scene_into(low_to, (int)transition.to_scene,
+                              runtime.frame);
+            cart_transition_blend(&transition, low, low_from, low_to,
+                                  (size_t)(LW * LH),
+                                  transition.elapsed_frames);
+            cart_transition_advance(&transition);
+            if (!cart_transition_active(&transition))
+                displayed_scene = transition.to_scene;
+        } else {
+            render_frame((int)displayed_scene, runtime.frame);
+        }
+        upscale(fb);
+        rendered_frames++;
         if(rendered_frames-report_frame>=300){
             uint64_t elapsed_ns=now_ns-report_start_ns;
             double elapsed=(double)elapsed_ns/1e9;
