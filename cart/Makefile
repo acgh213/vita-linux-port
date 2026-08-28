@@ -10,6 +10,7 @@ INPUT_SRC := $(CART_DIR)/src/input_evdev.c
 NORMALIZE_SRC := $(CART_DIR)/src/input_normalize.c
 ACTIONS_SRC := $(CART_DIR)/src/input_actions.c
 WORKER_POOL_SRC := $(CART_DIR)/src/worker_pool.c
+TRANSITION_SRC := $(CART_DIR)/src/transition.c
 SCENE_SRCS := $(CART_DIR)/src/scenes_builtin.c $(CART_DIR)/scenes/scene_2d_legacy.c
 SRCS := $(SRC) $(CANVAS_SRC) $(RUNTIME_SRC) $(INPUT_SRC) $(NORMALIZE_SRC) $(ACTIONS_SRC) $(WORKER_POOL_SRC) $(SCENE_SRCS)
 BUILD_DIR := $(CART_DIR)/build
@@ -21,6 +22,7 @@ INPUT_TEST_BIN := $(BUILD_DIR)/test-input
 INPUT_ACTIONS_TEST_BIN := $(BUILD_DIR)/test-input-actions
 INPUT_NORMALIZE_TEST_BIN := $(BUILD_DIR)/test-input-normalize
 WORKER_POOL_TEST_BIN := $(BUILD_DIR)/test-worker-pool
+PHOTOSENS_TEST_BIN := $(BUILD_DIR)/test-photosensitivity
 CAPTURE_SRC := $(BUILD_DIR)/capture-host.c
 CAPTURE_BIN := $(BUILD_DIR)/capture-host
 FIXTURES := $(CART_DIR)/tests/fixtures
@@ -36,7 +38,7 @@ TARGET_BIN := $(BUILD_DIR)/pstv-demo-cart.arm
 PRODUCTION_SRC := $(CART_DIR)/provenance/v0.1/pstv-demo-cart.c
 PRODUCTION_BIN := $(BUILD_DIR)/pstv-demo-cart.v0.1.arm
 
-.PHONY: all host-sanitize test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-worker-pool host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
+.PHONY: all host-sanitize test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-worker-pool test-photosensitivity host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
 
 FORCE:
 
@@ -68,6 +70,13 @@ test-input-normalize: $(INPUT_NORMALIZE_TEST_BIN)
 
 test-worker-pool: $(WORKER_POOL_TEST_BIN)
 	"$(WORKER_POOL_TEST_BIN)"
+
+test-photosensitivity: $(PHOTOSENS_TEST_BIN)
+	"$(PHOTOSENS_TEST_BIN)"
+
+$(PHOTOSENS_TEST_BIN): $(CART_DIR)/tests/test_photosensitivity.c $(CANVAS_SRC) $(TRANSITION_SRC) $(SCENE_SRCS) $(CART_DIR)/include/cart/transition.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_photosensitivity.c" $(CANVAS_SRC) $(TRANSITION_SRC) $(SCENE_SRCS) $(HOST_LDFLAGS) -lm -o "$@"
 
 test-runtime-loop:
 	"$(SHELL)" "$(CART_DIR)/tests/test_runtime_loop.sh" "$(SRC)"
@@ -238,7 +247,7 @@ cross-verify: cross-build
 	@readelf -h "$(TARGET_BIN)" | grep -q 'Flags:.*hard-float ABI'
 	@if readelf -l "$(TARGET_BIN)" | grep -q 'INTERP'; then printf '%s\n' 'FAIL cross-verify: dynamic interpreter present' >&2; exit 1; fi
 
-test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-input-normalize test-worker-pool host-sanitize host-capture
+test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-input-normalize test-worker-pool test-photosensitivity host-sanitize host-capture
 	"$(SHELL)" "$(CART_DIR)/tests/test_legacy_render.sh" --verify-only --compare-to "$(GENERATED_FIXTURES)"
 	@if [ "$${CART_IMMUTABILITY_GUARD:-}" != child ] && [ -z "$${CART_SKIP_IMMUTABILITY:-}" ]; then \
 		CART_IMMUTABILITY_GUARD=child CART_SKIP_IMMUTABILITY=1 \
