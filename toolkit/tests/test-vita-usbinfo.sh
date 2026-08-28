@@ -29,9 +29,9 @@ printf 'Cruzer\n' > "$SYS/bus/usb/devices/1-1/product"
 printf 'active\n' > "$SYS/bus/usb/devices/1-1/power/runtime_status"
 ln -s "$SYS/bus/usb/drivers/usb-storage" "$SYS/bus/usb/devices/1-1/driver"
 ln -s "$SYS/bus/usb/devices/1-1" "$SYS/class/block/sdb/device"
-ln -s "$SYS/bus/usb/devices/1-1" "$SYS/class/block/sdb1/device"
 : > "$DEV/sdb"
 : > "$DEV/sdb1"
+printf '1\n' > "$SYS/class/block/sdb1/partition"
 
 # A root hub/controller record, plus an interface entry the tool must skip.
 printf '1\n' > "$SYS/bus/usb/devices/usb1/busnum"
@@ -64,6 +64,8 @@ printf '%s\n' "$output" | grep -F 'usb_1_driver=usb-storage' >/dev/null
 printf '%s\n' "$output" | grep -F 'usb_1_runtime_status=active' >/dev/null
 printf '%s\n' "$output" | grep -F 'usb_1_block=sdb,sdb1' >/dev/null
 printf '%s\n' "$output" | grep -F 'usb_1_mounts=/mnt/vita-storage' >/dev/null
+printf '%s\n' "$output" | grep -F 'usb_2_block=NONE' >/dev/null
+printf '%s\n' "$output" | grep -F 'usb_2_mounts=NONE' >/dev/null
 if printf '%s\n' "$output" | grep -F '1-1:1.0' >/dev/null; then
     printf '%s\n' 'FAIL: USB interface leaked into device inventory' >&2
     exit 1

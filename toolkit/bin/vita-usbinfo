@@ -74,6 +74,12 @@ blocks_for() {
                 else
                     blocks=$block_name
                 fi
+                for partition_entry in "$SYSFS_ROOT/class/block/$block_name"*; do
+                    [ -f "$partition_entry/partition" ] || continue
+                    partition_name=${partition_entry##*/}
+                    [ -e "$DEV_ROOT/$partition_name" ] || continue
+                    blocks="$blocks,$partition_name"
+                done
                 ;;
         esac
     done
@@ -132,7 +138,11 @@ for entry in "$SYSFS_ROOT"/bus/usb/devices/*; do
     runtime_status=$(read_value "$entry/power/runtime_status")
     parent=$(parent_for "$name")
     driver=$(driver_for "$entry")
-    blocks=$(blocks_for "$real_entry")
+    if [ "${name#usb}" != "$name" ]; then
+        blocks=NONE
+    else
+        blocks=$(blocks_for "$real_entry")
+    fi
     mounts=$(mounts_for "$blocks")
 
     if [ "$MODE" = machine ]; then
