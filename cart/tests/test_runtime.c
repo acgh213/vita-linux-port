@@ -20,12 +20,29 @@ static void expect(int condition, const char *message)
         fail(message);
 }
 
+/* Photosensitivity guard used by the rate-limit tests. Smaller than
+ * SCENE_PERIOD so automatic rotation is still exercised normally. */
+#define GUARD (3 * STEP)
+
+/* Unguarded runtime: cooldown 0 preserves the original stepping semantics
+ * these tests were written against. */
 static struct cart_runtime fresh_runtime(void)
 {
     struct cart_runtime runtime;
 
-    expect(cart_runtime_init(&runtime, 6, START, STEP, SCENE_PERIOD) == 0,
+    expect(cart_runtime_init(&runtime, 6, START, STEP, SCENE_PERIOD, 0) == 0,
            "runtime initialization");
+    return runtime;
+}
+
+/* Guarded runtime: scene changes are rate limited to one per GUARD. */
+static struct cart_runtime guarded_runtime(void)
+{
+    struct cart_runtime runtime;
+
+    expect(cart_runtime_init(&runtime, 6, START, STEP, SCENE_PERIOD,
+                             GUARD) == 0,
+           "guarded runtime initialization");
     return runtime;
 }
 
@@ -133,7 +150,7 @@ static void test_request_previous_safety(void)
 
     cart_runtime_request_previous(NULL, START, SCENE_PERIOD);
 
-    expect(cart_runtime_init(&runtime, 1, START, STEP, SCENE_PERIOD) == 0,
+    expect(cart_runtime_init(&runtime, 1, START, STEP, SCENE_PERIOD, 0) == 0,
            "single scene runtime initialization");
     cart_runtime_tick(&runtime, START + 2 * SCENE_PERIOD);
     cart_runtime_request_previous(&runtime, START + 2 * SCENE_PERIOD,
@@ -170,16 +187,16 @@ static void test_no_negative_sleep_or_invalid_configuration(void)
 {
     struct cart_runtime runtime;
 
-    expect(cart_runtime_init(NULL, 6, START, STEP, SCENE_PERIOD) != 0,
+    expect(cart_runtime_init(NULL, 6, START, STEP, SCENE_PERIOD, 0) != 0,
            "null runtime rejected");
-    expect(cart_runtime_init(&runtime, 0, START, STEP, SCENE_PERIOD) != 0,
+    expect(cart_runtime_init(&runtime, 0, START, STEP, SCENE_PERIOD, 0) != 0,
            "zero scene count rejected");
-    expect(cart_runtime_init(&runtime, 6, START, 0, SCENE_PERIOD) != 0,
+    expect(cart_runtime_init(&runtime, 6, START, 0, SCENE_PERIOD, 0) != 0,
            "zero frame period rejected");
-    expect(cart_runtime_init(&runtime, 6, START, STEP, 0) != 0,
+    expect(cart_runtime_init(&runtime, 6, START, STEP, 0, 0) != 0,
            "zero scene period rejected");
     expect(cart_runtime_init(&runtime, 6, UINT64_MAX - 2 * STEP, STEP,
-                             SCENE_PERIOD) == 0,
+                             SCENE_PERIOD, 0) == 0,
            "origin with one representable deadline accepted");
     expect(cart_runtime_tick(&runtime, UINT64_MAX - STEP) == 0,
            "last representable deadline is usable");
@@ -190,6 +207,75 @@ static void test_no_negative_sleep_or_invalid_configuration(void)
     cart_runtime_tick(&runtime, START + 1000 * STEP);
     expect(runtime.sleep_ns > 0 && runtime.sleep_ns <= STEP,
            "successful tick always returns a positive bounded sleep");
+}
+
+static void test_manual_change_rate_limited(void)
+{
+    struct cart_runtime runtime = guarded_runtime();
+    size_t previous;
+    int cuts = 0;
+
+    /* Ten requests spread over a window shorter than the guard must not
+     * produce ten scene changes. WCAG general-flash limit is 3/sec. */
+    cart_runtime_tick(&runtime, START);
+    previous = runtime.scene_index;
+    for (int index = 0; index < 10; index++) {
+        uint64_t now = START + (uint64_t)index * (GUARD / 10);
+
+        cart_runtime_tick(&runtime, now);
+        cart_runtime_request_next(&runtime, now, SCENE_PERIOD);
+        if (runtime.scene_index != previous)
+            cuts++;
+        previous = runtime.scene_index;
+    }
+    expect(cuts <= 1, "ten rapid requests inside the guard yield at most one cut");
+}
+
+static void test_rate_limit_releases_after_interval(void)
+{
+    struct cart_runtime runtime = guarded_runtime();
+    size_t first;
+
+    cart_runtime_tick(&runtime, START);
+    cart_runtime_request_next(&runtime, START, SCENE_PERIOD);
+    first = runtime.scene_index;
+    expect(first == 1, "first request is honoured immediately");
+
+    /* Still inside the cooldown: suppressed. */
+    cart_runtime_request_next(&runtime, START + STEP, SCENE_PERIOD);
+    expect(runtime.scene_index == first, "request inside cooldown is suppressed");
+
+    /* Exactly at the cooldown boundary: honoured again. */
+    cart_runtime_request_next(&runtime, START + GUARD, SCENE_PERIOD);
+    expect(runtime.scene_index == 2, "request at the cooldown boundary is honoured");
+}
+
+static void test_rate_limit_applies_to_previous(void)
+{
+    struct cart_runtime runtime = guarded_runtime();
+    size_t first;
+
+    cart_runtime_tick(&runtime, START);
+    cart_runtime_request_previous(&runtime, START, SCENE_PERIOD);
+    first = runtime.scene_index;
+    expect(first == 5, "first previous wraps to the last scene");
+
+    cart_runtime_request_previous(&runtime, START + STEP, SCENE_PERIOD);
+    expect(runtime.scene_index == first,
+           "previous inside cooldown is suppressed");
+}
+
+static void test_zero_guard_preserves_legacy_stepping(void)
+{
+    struct cart_runtime runtime = fresh_runtime();
+
+    /* A zero cooldown must behave exactly as before: repeated requests at
+     * an identical timestamp still step. */
+    cart_runtime_tick(&runtime, START + 3 * SCENE_PERIOD);
+    cart_runtime_request_previous(&runtime, START + 3 * SCENE_PERIOD, 0);
+    expect(runtime.scene_index == 2, "zero guard still steps back once");
+    cart_runtime_request_previous(&runtime, START + 3 * SCENE_PERIOD, 0);
+    expect(runtime.scene_index == 1, "zero guard still steps back twice");
 }
 
 int main(void)
@@ -204,6 +290,10 @@ int main(void)
     test_request_previous_hold_pins_like_next();
     test_request_previous_without_hold_does_not_pin();
     test_request_previous_safety();
+    test_manual_change_rate_limited();
+    test_rate_limit_releases_after_interval();
+    test_rate_limit_applies_to_previous();
+    test_zero_guard_preserves_legacy_stepping();
     printf("all runtime tests passed\n");
     return 0;
 }
