@@ -262,6 +262,26 @@ conventions:
 Without `--probe`, it does not generate network traffic. It uses stable
 `key=value` output with `--machine`, like `vita-diag`.
 
+## Control command: `vita-control`
+
+`vita-control` is the first deliberately mutating toolkit command, but it is
+local-only: it talks to the already-running demo cart through its PID file and
+existing `SIGUSR1` scene-advance contract. It validates that `/proc/$pid/exe`
+is the expected cart before sending anything:
+
+```sh
+vita-control status --machine
+vita-control next --machine
+```
+
+`status` reports the cart PID, executable, running state, expected executable,
+and configured signal. `next` sends one `SIGUSR1`; accepted requests are
+rate-limited to 500 ms across invocations using a locked state file in `/run`.
+The action fails closed for a stale PID, a dead process, or an executable
+mismatch. It does not expose a network listener. A future HTTP control layer
+must add authentication and preserve this validation/rate-limit policy before
+LAN mutation is enabled.
+
 ## Planned sequence
 
 1. `vita-diag` — machine identity and baseline evidence. **Done.**
@@ -275,8 +295,9 @@ Without `--probe`, it does not generate network traffic. It uses stable
 7. `vita-fbserve` — read-only localhost framebuffer snapshot server. **Done.**
 8. `vita-bench` — compute, memory, framebuffer, and worker-scaling measurements.
    **Done.**
-9. `vita-control` — a deliberately small local/network control surface for
-   demos, with explicit read-only and mutating modes.
+9. `vita-control` — local status and explicitly rate-limited scene advance.
+   **Done.** Network mutation remains intentionally unimplemented pending
+   authentication design.
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
 network tests are bounded; framebuffer writes require an explicit subcommand;
