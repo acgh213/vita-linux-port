@@ -51,6 +51,9 @@ done
 [ -f "$SOURCE/bin/vita-netdiag" ] || { printf 'missing source file: %s/bin/vita-netdiag\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-toolkit-mount" ] || { printf 'missing source file: %s/bin/vita-toolkit-mount\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-storage" ] || { printf 'missing source file: %s/bin/vita-storage\n' "$SOURCE" >&2; exit 1; }
+[ -f "$SOURCE/bin/vita-fbserve" ] || { printf 'missing source file: %s/bin/vita-fbserve\n' "$SOURCE" >&2; exit 1; }
+[ -f "$SOURCE/bin/vita-fbserve.arm" ] || { printf 'missing source file: %s/bin/vita-fbserve.arm\n' "$SOURCE" >&2; exit 1; }
+[ -f "$SOURCE/share/vita-fbserve.c" ] || { printf 'missing source file: %s/share/vita-fbserve.c\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/squashfs/VERSION" ] || { printf 'missing source file: %s/squashfs/VERSION\n' "$SOURCE" >&2; exit 1; }
 
 hash_file() {
@@ -172,11 +175,14 @@ install -m 0755 "$SOURCE/bin/vita-netdiag" "$STAGE/bin/vita-netdiag"
 install -m 0755 "$SOURCE/bin/vita-toolkit-mount" "$STAGE/bin/vita-toolkit-mount"
 install -m 0755 "$SOURCE/bin/vita-storage" "$STAGE/bin/vita-storage"
 install -m 0755 "$SOURCE/bin/vita-fb" "$STAGE/bin/vita-fb"
+install -m 0755 "$SOURCE/bin/vita-fbserve" "$STAGE/bin/vita-fbserve"
 install -m 0755 "$SOURCE/bin/vita-bench" "$STAGE/bin/vita-bench"
 install -m 0755 "$SOURCE/bin/vita-bench.arm" "$STAGE/libexec/vita-bench.arm"
+install -m 0755 "$SOURCE/bin/vita-fbserve.arm" "$STAGE/libexec/vita-fbserve.arm"
 install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
 install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
 install -m 0644 "$SOURCE/share/vita-bench.c" "$STAGE/share/vita-bench.c"
+install -m 0644 "$SOURCE/share/vita-fbserve.c" "$STAGE/share/vita-fbserve.c"
 
 if [ -n "$TOOLCHAIN_ROOT" ]; then
     while IFS= read -r rel; do

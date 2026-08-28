@@ -197,7 +197,29 @@ The host test uses a fake sysfs and framebuffer root and covers complete and
 truncated captures/restores plus bound and unbound fbcon states. It does not
 require display output or hardware.
 
-## Benchmark command: `vita-bench`
+## Sixth command: `vita-fbserve`
+
+`vita-fbserve` is a read-only HTTP snapshot server for the PSTV framebuffer. It
+samples `/dev/fb0`, reduces the fixed 1280×720 RGBA frame to a 320×180 24-bit
+BMP, and serves it without changing framebuffer bytes or fbcon ownership:
+
+```sh
+# Local-only by default; visit http://127.0.0.1:8080/
+vita-fbserve --machine
+
+# Deliberately expose it on the LAN when wanted
+vita-fbserve --bind 0.0.0.0 --port 8080
+```
+
+`/` and `/frame.bmp` return the current snapshot. `/health` returns a small
+read-only status response. Only `GET` is accepted; unsupported methods receive
+`405`. The server uses fixed-size buffers, bounded request parsing, and opens
+the framebuffer read-only. The installed wrapper launches the static ARM core
+from `libexec/vita-fbserve.arm`; the C source is included in `share/` for
+reproducible rebuilds. Binding to localhost is the safe default—LAN exposure
+requires the explicit `--bind 0.0.0.0` choice.
+
+## Seventh command: `vita-bench`
 
 The benchmark is a small static ARM C program built with the host's hard-float
 ARM GCC toolchain. Its source is included in the payload for reproducible
@@ -250,9 +272,10 @@ Without `--probe`, it does not generate network traffic. It uses stable
    development sysroot in the external payload. **Done.**
 6. `vita-fb` — framebuffer metadata, safe capture/restore, and fbcon ownership
    checks. **Done.**
-7. `vita-bench` — compute, memory, framebuffer, and worker-scaling measurements.
+7. `vita-fbserve` — read-only localhost framebuffer snapshot server. **Done.**
+8. `vita-bench` — compute, memory, framebuffer, and worker-scaling measurements.
    **Done.**
-8. `vita-control` — a deliberately small local/network control surface for
+9. `vita-control` — a deliberately small local/network control surface for
    demos, with explicit read-only and mutating modes.
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
