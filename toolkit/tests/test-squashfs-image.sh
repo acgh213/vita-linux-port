@@ -24,6 +24,61 @@ printf '%s\n' "$dry_run" | grep -F -- '-comp zstd' >/dev/null
 printf '%s\n' "$dry_run" | grep -F -- '-no-xattrs' >/dev/null
 printf '%s\n' "$dry_run" | grep -F 'manifest:' >/dev/null
 
+# A generated native-toolchain root is optional, but when supplied it must be
+# authenticated by its own complete manifest before any file enters the image.
+TOOLCHAIN="$TMP/native-toolchain"
+mkdir -p "$TOOLCHAIN/bin" "$TOOLCHAIN/lib/tcc/include" \
+    "$TOOLCHAIN/sysroot/usr/include" "$TOOLCHAIN/sysroot/usr/lib" \
+    "$TOOLCHAIN/share/native-toolchain"
+printf '#!/bin/sh\nexit 0\n' >"$TOOLCHAIN/bin/tcc"
+chmod 0755 "$TOOLCHAIN/bin/tcc"
+printf 'runtime\n' >"$TOOLCHAIN/lib/tcc/libtcc1.a"
+printf 'internal\n' >"$TOOLCHAIN/lib/tcc/include/tccdefs.h"
+printf 'stdio\n' >"$TOOLCHAIN/sysroot/usr/include/stdio.h"
+printf 'crt\n' >"$TOOLCHAIN/sysroot/usr/lib/crt1.o"
+printf 'libc\n' >"$TOOLCHAIN/sysroot/usr/lib/libc.so"
+printf 'tcc_revision=fixture\n' >"$TOOLCHAIN/share/native-toolchain/BUILD-INFO"
+(
+    cd "$TOOLCHAIN"
+    find . -type f ! -name NATIVE-TOOLCHAIN-MANIFEST -print \
+        | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r rel; do
+        mode=$(stat -c '%a' "$rel" 2>/dev/null || stat -f '%Lp' "$rel")
+        size=$(wc -c <"$rel" | tr -d ' ')
+        hash=$(sha256sum "$rel" | awk '{print $1}')
+        printf '%s %s %s %s\n' "$rel" "$mode" "$size" "$hash"
+    done
+) >"$TOOLCHAIN/NATIVE-TOOLCHAIN-MANIFEST"
+
+toolchain_manifest=$("$BUILDER" --source "$ROOT/toolkit" \
+    --toolchain-root "$TOOLCHAIN" --manifest-only)
+for path in bin/tcc lib/tcc/libtcc1.a sysroot/usr/include/stdio.h \
+            sysroot/usr/lib/libc.so NATIVE-TOOLCHAIN-MANIFEST; do
+    printf '%s\n' "$toolchain_manifest" | grep -F "$path " >/dev/null \
+        || { printf 'FAIL: payload manifest omits toolchain path %s\n' "$path" >&2; exit 1; }
+done
+
+# An unmanifested file must fail closed—even an innocuous name—because that is
+# how credentials or host artifacts otherwise leak into a generated payload.
+printf 'not declared\n' >"$TOOLCHAIN/unlisted-file"
+if "$BUILDER" --source "$ROOT/toolkit" --toolchain-root "$TOOLCHAIN" \
+        --manifest-only >"$TMP/unlisted.log" 2>&1; then
+    printf 'FAIL: builder accepted an unmanifested toolchain file\n' >&2
+    exit 1
+fi
+grep -qi 'manifest' "$TMP/unlisted.log" \
+    || { printf 'FAIL: unmanifested-file rejection lacks a diagnostic\n' >&2; exit 1; }
+rm -f "$TOOLCHAIN/unlisted-file"
+
+# Manifest entries are content contracts, not merely allowlist names.
+printf 'tampered\n' >>"$TOOLCHAIN/bin/tcc"
+if "$BUILDER" --source "$ROOT/toolkit" --toolchain-root "$TOOLCHAIN" \
+        --manifest-only >"$TMP/tampered.log" 2>&1; then
+    printf 'FAIL: builder accepted a hash-mismatched toolchain file\n' >&2
+    exit 1
+fi
+grep -qi 'hash\|manifest' "$TMP/tampered.log" \
+    || { printf 'FAIL: hash rejection lacks a diagnostic\n' >&2; exit 1; }
+
 printf 'not an image\n' > "$TMP/existing.squashfs"
 if "$BUILDER" --source "$ROOT/toolkit" --output "$TMP/existing.squashfs" --dry-run >/dev/null 2>&1; then
     printf 'FAIL: dry-run accepted an existing output without --force\n' >&2
