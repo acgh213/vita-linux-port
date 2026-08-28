@@ -4,6 +4,7 @@
 #include <cart/runtime.h>
 #include <cart/scene.h>
 #include <cart/transition.h>
+#include <cart/presentation.h>
 #include <cart/worker_pool.h>
 
 #include <errno.h>
@@ -55,22 +56,12 @@ static uint32_t low_from[LW * LH];
 static uint32_t low_to[LW * LH];
 static struct cart_transition transition;
 static size_t displayed_scene;
+static uint32_t display_row[FW];
 
-/* Presentation staging buffer.
- *
- * The cart's /dev/fb0 mapping is WRITE-COMBINING, not cached: simplefb maps
- * it with ioremap_wc() (drivers/video/fbdev/simplefb.c) and fb_io_mmap()
- * applies pgprot_framebuffer(), which resolves to pgprot_writecombine()
- * (include/asm-generic/video.h). Write-combining memory has no read-allocate
- * and merges stores through a small buffer, so the 172,800 scattered strided
- * memcpys upscale() issues are close to a worst case for it, while a single
- * linear sweep is the ideal pattern.
- *
- * Composing here first and then blitting once therefore both shortens the
- * interval in which scanout can catch a half-written frame and suits the
- * memory type. Note this is a pessimisation on a cached host framebuffer
- * (measured +0.23 ms/frame) and a win only on the real target. */
-static uint32_t back[FW * FH];
+/* The simplefb driver has no page flip or vsync ioctl. Presentation therefore
+ * uses one linear write-combining sweep per completed logical frame. A second
+ * full-frame DRAM staging copy measured at ~15 FPS on the PSTV, so it is not
+ * a viable mitigation; the true atomic fix remains a real display driver. */
 
 static void row_job(void *slot, int row_start, int row_end, uint64_t frame)
 {
@@ -128,15 +119,6 @@ static void render_scene_into(uint32_t *destination, int which, uint64_t frame)
     low_canvas.pixels = destination;
     render_frame(which, frame);
     low_canvas.pixels = saved;
-}
-
-static void upscale(uint32_t *dst)
-{
-    uint32_t row[FW];
-    for(int y=0;y<LH;y++){
-        for(int x=0;x<LW;x++) for(int k=0;k<SCALE;k++) row[x*SCALE+k]=low[y*LW+x];
-        for(int k=0;k<SCALE;k++) memcpy(dst+(y*SCALE+k)*FW,row,sizeof(row));
-    }
 }
 
 static int dump_ppm(const char *path)
@@ -277,16 +259,21 @@ int main(int argc,char **argv)
         /* Begin a fade whenever the runtime selects a different scene.
          * A fade already in flight is never interrupted — the rate limiter
          * in cart_runtime guarantees the next change cannot arrive before
-         * this one completes. */
+         * this one completes. Sample both endpoints once: rendering both
+         * scenes on every fade frame cuts the target's frame rate in half. */
         if (runtime.scene_index != displayed_scene &&
-            !cart_transition_active(&transition))
+            !cart_transition_active(&transition)) {
             cart_transition_begin(&transition, displayed_scene,
                                   runtime.scene_index);
+            if (cart_transition_sources_need_render(&transition)) {
+                render_scene_into(low_from, (int)transition.from_scene,
+                                  runtime.frame);
+                render_scene_into(low_to, (int)transition.to_scene,
+                                  runtime.frame);
+                cart_transition_mark_sources_rendered(&transition);
+            }
+        }
         if (cart_transition_active(&transition)) {
-            render_scene_into(low_from, (int)transition.from_scene,
-                              runtime.frame);
-            render_scene_into(low_to, (int)transition.to_scene,
-                              runtime.frame);
             cart_transition_blend(&transition, low, low_from, low_to,
                                   (size_t)(LW * LH),
                                   transition.elapsed_frames);
@@ -296,8 +283,7 @@ int main(int argc,char **argv)
         } else {
             render_frame((int)displayed_scene, runtime.frame);
         }
-        upscale(back);
-        memcpy(fb, back, (size_t)FW * FH * 4);
+        cart_presentation_upscale(fb, low, display_row);
         rendered_frames++;
         if(rendered_frames-report_frame>=300){
             uint64_t elapsed_ns=now_ns-report_start_ns;

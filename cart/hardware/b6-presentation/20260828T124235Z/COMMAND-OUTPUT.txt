@@ -1,0 +1,35 @@
+4eee4b0676a546b1d576af8a7f3f97a7ad01d6e9db95a238b3a9ac785fadae0b  /usr/local/bin/pstv-demo-cart
+f1fa752c48bdbd1572fbbbb3f09f724120741a68955b79cab1ed07139f9a6005  /tmp/pstv-demo-cart-b6-presentation
+known_good_before_bytes=3686400
+known_good_before_sha256=c3a28797f485853a4b362ad34e8e22e299da46b44188938d64ce9754f7850035
+stopped /usr/local/bin/pstv-demo-cart (pid 8860)
+PSTV Demo Cart stopped; framebuffer console restored
+PSTV Demo Cart running (pid 22166); log: /run/pstv-demo-cart-b6.log
+candidate_pid=22166
+candidate_exe=/tmp/pstv-demo-cart-b6-presentation
+candidate_fbcon=0
+candidate_scene_0_bytes=3686400
+candidate_scene_0_sha256=884c83263f73a1da047077ff389d5e7453e4c63d175d02d45ec6c8e5fdabd925
+candidate_scene_1_bytes=3686400
+candidate_scene_1_sha256=3b4b31714be73f84d85fe7071985d6040fb4f4c68bf6ea123660224c946db267
+candidate_scene_2_bytes=3686400
+candidate_scene_2_sha256=4550e5252a33b1b7f5ec192c8fd376611d6ca09c0b388f25e5ab0f06b0e85408
+candidate_scene_3_bytes=3686400
+candidate_scene_3_sha256=dd884155aea268d4ae9286eb8b6e2e0f5c39c385775e7f2d2f86a270fc1dbb86
+candidate_scene_4_bytes=3686400
+candidate_scene_4_sha256=6c3b3c0b37dbba47133eded0e626359caba88372a1041a9380fe587cdeb60efe
+candidate_scene_5_bytes=3686400
+candidate_scene_5_sha256=5e2988a9705f73a8588697dc02465360feb93aa071121690721d6907e8177847
+=== candidate log ===
+input sources connected
+frames=300 scene=4 fps=27.95 dropped=0
+stopped /tmp/pstv-demo-cart-b6-presentation (pid 22166)
+PSTV Demo Cart stopped; framebuffer console restored
+PSTV Demo Cart running (pid 22250); log: /run/pstv-demo-cart.log
+known_good_after_bytes=3686400
+known_good_after_sha256=c471906bc09d67b7b60a52f637255061b9785c4b9c636355522ba2f914246064
+dmesg_unchanged=0
+final_pid=22250
+final_exe=/usr/local/bin/pstv-demo-cart
+final_fbcon=0
+final_online=0-3

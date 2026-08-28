@@ -17,6 +17,7 @@ void cart_transition_begin(struct cart_transition *transition,
     transition->to_scene = to_scene;
     transition->elapsed_frames = 0;
     transition->active = from_scene != to_scene;
+    transition->sources_ready = 0;
 }
 
 int cart_transition_active(const struct cart_transition *transition)
@@ -31,6 +32,17 @@ void cart_transition_advance(struct cart_transition *transition)
     transition->elapsed_frames++;
     if (transition->elapsed_frames >= CART_TRANSITION_FRAMES)
         transition->active = 0;
+}
+
+int cart_transition_sources_need_render(const struct cart_transition *transition)
+{
+    return transition != NULL && transition->active && !transition->sources_ready;
+}
+
+void cart_transition_mark_sources_rendered(struct cart_transition *transition)
+{
+    if (transition != NULL && transition->active)
+        transition->sources_ready = 1;
 }
 
 /* Smoothstep: 3t^2 - 2t^3, evaluated in fixed point.

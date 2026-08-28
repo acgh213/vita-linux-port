@@ -25,6 +25,7 @@ struct cart_transition {
     size_t to_scene;
     uint64_t elapsed_frames;
     int active;
+    int sources_ready;
 };
 
 /* Begin a fade from one scene to another. A transition to the same scene is
@@ -36,6 +37,10 @@ int cart_transition_active(const struct cart_transition *transition);
 
 /* Advance one frame; clears the active flag once the fade completes. */
 void cart_transition_advance(struct cart_transition *transition);
+
+/* Transition endpoint frames are sampled once and reused for the fade. */
+int cart_transition_sources_need_render(const struct cart_transition *transition);
+void cart_transition_mark_sources_rendered(struct cart_transition *transition);
 
 /* Smoothstep-eased blend weight in [0, 256] for the given step. Monotonic,
  * exact at both endpoints. */

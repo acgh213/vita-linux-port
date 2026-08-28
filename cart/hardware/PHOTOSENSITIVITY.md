@@ -127,18 +127,21 @@ The framebuffer mapping is **write-combining, not cached**:
   `include/asm-generic/video.h:23` → `pgprot_writecombine()`
 
 Write-combining memory has no read-allocate and merges stores through a small
-buffer. The 172,800 scattered strided memcpys `upscale()` issues are close to
-a worst case for it; one linear sweep is the ideal pattern. Frames are now
-composed in a cached back buffer and blitted once.
+buffer. The 172,800 scattered strided memcpys `upscale()` issued are close to
+worst case for it; one linear sweep is the ideal pattern. The final presentation
+path therefore expands directly into the framebuffer using one caller-owned
+row buffer. A full cached 1280×720 back buffer was tested on the PSTV and
+reduced the renderer to about 15 FPS, so it is not viable at the 30 FPS target.
 
-**This is a pessimisation on a cached host framebuffer** — measured at
-+0.23 ms/frame, with the host fb-touch window becoming 2.1× *longer*. It is a
-win only on the real target's write-combining memory. Do not "optimise" it
-away based on host timings.
+The transition endpoints are sampled once at the start of each 15-frame fade;
+the fade frames then blend those cached logical images before the single linear
+framebuffer sweep. This keeps the expensive scene rendering out of the fade
+hot path while preserving the luminance-safe crossfade.
 
 **Tearing is reduced, not eliminated.** Fully fixing it requires a real Vita
-display driver with double buffering and vsync. That is future work and was
-explicitly not attempted here.
+display driver with double buffering and vsync. `simplefb` cannot provide that,
+and the direct linear path is an evidence-based throughput tradeoff, not an
+atomic scanout solution.
 
 ---
 
@@ -158,22 +161,21 @@ explicitly not attempted here.
 
 ## Performance headroom
 
-A crossfade renders **two** scenes per frame plus a blend. If frames drop
-*during* a fade, the fade itself becomes a flash hazard, because a dropped
-frame mid-fade is a large luminance step. Measured on host:
+A crossfade samples **two** scenes once at its start, then each fade frame only
+blends the cached logical buffers and publishes one linear framebuffer sweep.
+The target check therefore needs to watch both steady rendering and transition
+windows. Measured on the final PSTV candidate:
 
-| | Cost | Budget used |
-|---|---|---|
-| Worst steady frame (scene 2) | 1.377 ms | 4.1% |
-| Worst fade frame (2→3) | 2.048 ms | 6.1% |
-| Fade / steady ratio | 1.49× | |
-| Headroom before overrun | **16.3×** | |
+| Run | Result |
+|---|---|
+| Short six-scene cycle | 27.95 FPS, 0 dropped deadlines |
+| 60-second cycle, 1,800 frames | 30.09 / 27.87 / 29.79 / 30.01 / 30.00 / 30.00 FPS windows, 0 dropped deadlines |
+| Full-frame backbuffer comparison | about 15 FPS; rejected |
 
-The blend is cheap; the second scene render dominates. Even a 10× slower ARM
-core leaves the worst fade frame inside the 33.3 ms budget.
-
-**This remains the most important thing to watch on hardware.** Host timings
-cannot predict PSTV memory behaviour.
+The 60-second run crossed multiple automatic scene changes and completed with
+the candidate alive, all four CPUs online, and no fault signatures. Host timings
+cannot predict PSTV memory behaviour; this hardware result is the governing
+presentation decision.
 
 ---
 
@@ -240,7 +242,10 @@ colorspace tags and zscale otherwise fails with "no path between colorspaces".
 
 - `src/transition.c`, `include/cart/transition.h` — eased crossfade
 - `src/runtime.c`, `include/cart/runtime.h` — scene-change rate limiter
-- `src/pstv-demo-cart.c` — crossfade wiring, back buffer
+- `src/pstv-demo-cart.c` — crossfade wiring, endpoint caching, direct publish
+- `src/presentation.c`, `include/cart/presentation.h` — tested nearest-neighbor framebuffer expansion
 - `tests/test_photosensitivity.c` — permanent WCAG gate (`make test-photosensitivity`)
+- `tests/test_transition.c` — one-render-per-transition endpoint-cache contract
+- `tests/test_presentation.c` — complete-frame expansion contract
 - `tests/test_runtime.c` — rate-limit and rotation-deferral tests
 - `docs/plans/2026-08-27-pstv-transition-flash-repair.md` — full plan
