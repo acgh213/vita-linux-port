@@ -2,7 +2,7 @@
 # Behavioral contract for tools/build-vita-native-toolchain.sh.
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)
 BUILDER="$ROOT/tools/build-vita-native-toolchain.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' 0 HUP INT TERM

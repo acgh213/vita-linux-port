@@ -4,6 +4,8 @@ set -eu
 
 SOURCE=toolkit
 OUTPUT=dist/vita-toolkit.squashfs
+TOOLCHAIN_ROOT=
+VERIFY=
 FORCE=0
 MODE=build
 
@@ -11,6 +13,7 @@ usage() {
     printf '%s\n' \
         'usage: tools/build-vita-toolkit-squashfs.sh [options]' \
         '  --source DIR          toolkit source tree (default: toolkit)' \
+        '  --toolchain-root DIR  verified generated native-toolchain tree' \
         '  --output FILE         SquashFS output (default: dist/vita-toolkit.squashfs)' \
         '  --force               replace an existing output' \
         '  --dry-run             print the image command without running it' \
@@ -22,6 +25,9 @@ while [ "$#" -gt 0 ]; do
         --source)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
             SOURCE=$2; shift 2 ;;
+        --toolchain-root)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            TOOLCHAIN_ROOT=$2; shift 2 ;;
         --output)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
             OUTPUT=$2; shift 2 ;;
@@ -40,32 +46,19 @@ done
 [ -f "$SOURCE/bin/vita-storage" ] || { printf 'missing source file: %s/bin/vita-storage\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/squashfs/VERSION" ] || { printf 'missing source file: %s/squashfs/VERSION\n' "$SOURCE" >&2; exit 1; }
 
-if [ "$MODE" != manifest ] && [ "$FORCE" -ne 1 ] && [ -e "$OUTPUT" ]; then
-    printf 'refusing to overwrite existing output: %s\n' "$OUTPUT" >&2
-    exit 1
-fi
-if [ "$MODE" != manifest ] && [ "$MODE" != dry-run ] && ! command -v mksquashfs >/dev/null 2>&1; then
-    printf 'mksquashfs is required for image creation\n' >&2
-    exit 1
-fi
-
-STAGE=$(mktemp -d "${TMPDIR:-/tmp}/vita-toolkit-stage.XXXXXX")
-trap 'rm -rf "$STAGE"' 0 HUP INT TERM
-mkdir -p "$STAGE/bin" "$STAGE/share"
-chmod 0755 "$STAGE" "$STAGE/bin" "$STAGE/share"
-
-install -m 0755 "$SOURCE/bin/vita-diag" "$STAGE/bin/vita-diag"
-install -m 0755 "$SOURCE/bin/vita-netdiag" "$STAGE/bin/vita-netdiag"
-install -m 0755 "$SOURCE/bin/vita-toolkit-mount" "$STAGE/bin/vita-toolkit-mount"
-install -m 0755 "$SOURCE/bin/vita-storage" "$STAGE/bin/vita-storage"
-install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
-install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
-
 hash_file() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | awk '{print $1}'
     else
         shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+hash_text() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha256sum | awk '{print $1}'
+    else
+        printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
     fi
 }
 
@@ -77,12 +70,121 @@ file_mode() {
     stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
+if [ -n "$TOOLCHAIN_ROOT" ]; then
+    [ -d "$TOOLCHAIN_ROOT" ] || { printf 'missing toolchain root: %s\n' "$TOOLCHAIN_ROOT" >&2; exit 1; }
+    TOOLCHAIN_MANIFEST=$TOOLCHAIN_ROOT/NATIVE-TOOLCHAIN-MANIFEST
+    [ -f "$TOOLCHAIN_MANIFEST" ] || { printf 'missing toolchain manifest: %s\n' "$TOOLCHAIN_MANIFEST" >&2; exit 1; }
+    for required in bin/tcc lib/tcc/libtcc1.a lib/tcc/include/tccdefs.h \
+                    sysroot/usr/include/stdio.h sysroot/usr/lib/crt1.o \
+                    sysroot/usr/lib/libc.so share/native-toolchain/BUILD-INFO; do
+        [ -e "$TOOLCHAIN_ROOT/$required" ] || { printf 'toolchain manifest root lacks %s\n' "$required" >&2; exit 1; }
+    done
+
+    VERIFY=$(mktemp -d "${TMPDIR:-/tmp}/vita-toolchain-verify.XXXXXX")
+    trap 'rm -rf "$VERIFY"' 0 HUP INT TERM
+    : >"$VERIFY/listed"
+    previous=
+    while IFS=' ' read -r rel expected_mode expected_size expected_hash extra; do
+        if ! { [ -n "$rel" ] && [ -n "$expected_mode" ] \
+                && [ -n "$expected_size" ] && [ -n "$expected_hash" ] \
+                && [ -z "$extra" ]; }; then
+            printf 'malformed toolchain manifest entry: %s\n' "$rel" >&2
+            exit 1
+        fi
+        case "$rel" in
+            /*|..|../*|*/../*|*/..|*" "*|*"	"*)
+                printf 'unsafe toolchain manifest path: %s\n' "$rel" >&2; exit 1 ;;
+        esac
+        [ "$rel" != "$previous" ] || { printf 'duplicate toolchain manifest path: %s\n' "$rel" >&2; exit 1; }
+        previous=$rel
+        path=$TOOLCHAIN_ROOT/$rel
+        [ -f "$path" ] || [ -L "$path" ] \
+            || { printf 'toolchain manifest path is missing: %s\n' "$rel" >&2; exit 1; }
+        if [ -L "$path" ]; then
+            target=$(readlink "$path")
+            case "$target" in
+                /*|..|../*|*/../*|*/..)
+                    printf 'unsafe toolchain symlink: %s -> %s\n' "$rel" "$target" >&2; exit 1 ;;
+            esac
+            actual_size=${#target}
+            actual_hash=$(hash_text "$target")
+        else
+            actual_size=$(file_size "$path")
+            actual_hash=$(hash_file "$path")
+        fi
+        actual_mode=$(file_mode "$path")
+        [ "$actual_mode" = "$expected_mode" ] \
+            || { printf 'toolchain manifest mode mismatch: %s\n' "$rel" >&2; exit 1; }
+        [ "$actual_size" = "$expected_size" ] \
+            || { printf 'toolchain manifest size mismatch: %s\n' "$rel" >&2; exit 1; }
+        [ "$actual_hash" = "$expected_hash" ] \
+            || { printf 'toolchain manifest hash mismatch: %s\n' "$rel" >&2; exit 1; }
+        printf '%s\n' "$rel" >>"$VERIFY/listed"
+    done <"$TOOLCHAIN_MANIFEST"
+    LC_ALL=C sort -c "$VERIFY/listed" 2>/dev/null \
+        || { printf '%s\n' 'toolchain manifest is not sorted' >&2; exit 1; }
+    (
+        cd "$TOOLCHAIN_ROOT"
+        find . \( -type f -o -type l \) ! -name NATIVE-TOOLCHAIN-MANIFEST -print \
+            | sed 's|^\./||' | LC_ALL=C sort
+    ) >"$VERIFY/actual"
+    cmp -s "$VERIFY/listed" "$VERIFY/actual" \
+        || { printf '%s\n' 'toolchain manifest does not cover the exact file set' >&2; exit 1; }
+    if grep -E '(^|/)(\.git|\.ssh|local)(/|$)|wpa_supplicant' "$VERIFY/listed" >/dev/null; then
+        printf '%s\n' 'toolchain manifest contains forbidden local material' >&2
+        exit 1
+    fi
+fi
+
+if [ "$MODE" != manifest ] && [ "$FORCE" -ne 1 ] && [ -e "$OUTPUT" ]; then
+    printf 'refusing to overwrite existing output: %s\n' "$OUTPUT" >&2
+    exit 1
+fi
+if [ "$MODE" != manifest ] && [ "$MODE" != dry-run ] && ! command -v mksquashfs >/dev/null 2>&1; then
+    printf 'mksquashfs is required for image creation\n' >&2
+    exit 1
+fi
+
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/vita-toolkit-stage.XXXXXX")
+trap 'rm -rf "$VERIFY" "$STAGE"' 0 HUP INT TERM
+mkdir -p "$STAGE/bin" "$STAGE/share"
+chmod 0755 "$STAGE" "$STAGE/bin" "$STAGE/share"
+
+install -m 0755 "$SOURCE/bin/vita-diag" "$STAGE/bin/vita-diag"
+install -m 0755 "$SOURCE/bin/vita-netdiag" "$STAGE/bin/vita-netdiag"
+install -m 0755 "$SOURCE/bin/vita-toolkit-mount" "$STAGE/bin/vita-toolkit-mount"
+install -m 0755 "$SOURCE/bin/vita-storage" "$STAGE/bin/vita-storage"
+install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
+install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
+
+if [ -n "$TOOLCHAIN_ROOT" ]; then
+    while IFS= read -r rel; do
+        if [ -e "$STAGE/$rel" ] || [ -L "$STAGE/$rel" ]; then
+            printf 'toolchain path collides with toolkit payload: %s\n' "$rel" >&2
+            exit 1
+        fi
+    done <"$VERIFY/listed"
+    cp -a "$TOOLCHAIN_ROOT/." "$STAGE/"
+fi
+
 MANIFEST=$STAGE/MANIFEST
-: > "$MANIFEST"
-for rel in VERSION bin/vita-diag bin/vita-netdiag bin/vita-toolkit-mount bin/vita-storage share/README.md; do
+: >"$MANIFEST"
+(
+    cd "$STAGE"
+    find . \( -type f -o -type l \) ! -name MANIFEST -print \
+        | sed 's|^\./||' | LC_ALL=C sort
+) | while IFS= read -r rel; do
     file=$STAGE/$rel
-    printf '%s %s %s %s\n' "$rel" "$(file_mode "$file")" \
-        "$(file_size "$file")" "$(hash_file "$file")" >> "$MANIFEST"
+    if [ -L "$file" ]; then
+        target=$(readlink "$file")
+        hash=$(hash_text "$target")
+        size=${#target}
+    else
+        hash=$(hash_file "$file")
+        size=$(file_size "$file")
+    fi
+    printf '%s %s %s %s\n' "$rel" "$(file_mode "$file")" "$size" "$hash" \
+        >>"$MANIFEST"
 done
 
 if [ "$MODE" = manifest ]; then
