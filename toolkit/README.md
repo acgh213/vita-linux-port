@@ -199,8 +199,14 @@ require display output or hardware.
 
 ## Benchmark command: `vita-bench`
 
-The benchmark is a small C program compiled by the payload's native `cc` at
-run time. It measures dependency-chain compute, private-buffer `memcpy`, and
+The benchmark is a small static ARM C program built with the host's hard-float
+ARM GCC toolchain. Its source is included in the payload for reproducible
+rebuilds, while the deployed binary avoids depending on the native TinyCC.
+The native TinyCC remains available for small on-device C experiments; this
+particular benchmark uses the verified static GCC artifact because TinyCC's
+output for the multi-threaded workload was not stable on the target.
+
+It measures dependency-chain compute, private-buffer `memcpy`, and
 private-buffer `memset` across one, two, and four workers (or a selected worker
 count):
 

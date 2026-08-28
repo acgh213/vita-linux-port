@@ -105,14 +105,14 @@ static void *worker_main(void *opaque) {
     pthread_mutex_unlock(&args->gate->mutex);
 
     if (args->kind == WORK_COMPUTE) {
-        uint64_t value = 0x9e3779b97f4a7c15ULL ^ (uint64_t)(uintptr_t)args;
-        uint64_t operations = (uint64_t)args->rounds * 1000000ULL;
-        uint64_t index;
+        uint32_t value = 0x9e3779b9U ^ (uint32_t)(uintptr_t)args;
+        uint32_t operations = args->rounds * 1000000U;
+        uint32_t index;
         for (index = 0; index < operations; ++index) {
-            value ^= value >> 12;
-            value ^= value << 25;
-            value ^= value >> 27;
-            value = value * 2685821657736338717ULL + index;
+            value ^= value >> 13;
+            value ^= value << 17;
+            value ^= value >> 5;
+            value = value * 1664525U + 1013904223U + index;
         }
         checksum = value;
     } else {

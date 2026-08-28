@@ -33,17 +33,17 @@ printf '%s\n' "$out4" | grep -F 'memcpy_4_workers_mib_s=' >/dev/null
 printf '%s\n' "$out4" | grep -F 'memset_4_workers_mib_s=' >/dev/null
 printf '%s\n' "$out4" | grep -F 'framebuffer=skipped' >/dev/null
 
-# The installed wrapper must invoke the payload compiler and source, while
+# The installed wrapper must invoke the payload benchmark binary, while
 # leaving framebuffer access opt-in.
-printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "$VITA_BENCH_TEST_LOG"\nprintf "wrapper_ok\\n"\n' > "$TMP/fake-cc"
-chmod +x "$TMP/fake-cc"
-printf 'source\n' > "$TMP/toolkit/share/vita-bench.c"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "$VITA_BENCH_TEST_LOG"\nprintf "binary_ok\\n"\n' > "$TMP/fake-bench"
+chmod +x "$TMP/fake-bench"
+mkdir -p "$TMP/toolkit/libexec"
+cp "$TMP/fake-bench" "$TMP/toolkit/libexec/vita-bench.arm"
 wrapper_out=$(VITA_BENCH_ROOT="$TMP/toolkit" \
-    VITA_BENCH_CC="$TMP/fake-cc" \
+    VITA_BENCH_BINARY="$TMP/toolkit/libexec/vita-bench.arm" \
     VITA_BENCH_TEST_LOG="$TMP/wrapper.log" \
     "$TOOL" --machine --quick)
-printf '%s\n' "$wrapper_out" | grep -F 'wrapper_ok' >/dev/null
-grep -F -- '-run ' "$TMP/wrapper.log" >/dev/null
+printf '%s\n' "$wrapper_out" | grep -F 'binary_ok' >/dev/null
 grep -F -- '--machine --quick' "$TMP/wrapper.log" >/dev/null
 if grep -F -- '--framebuffer' "$TMP/wrapper.log" >/dev/null; then
     printf 'FAIL: default wrapper enabled framebuffer access\n' >&2

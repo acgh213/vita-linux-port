@@ -164,7 +164,7 @@ fi
 
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/vita-toolkit-stage.XXXXXX")
 trap 'rm -rf "$VERIFY" "$STAGE" "$PUBLISH"' 0 HUP INT TERM
-mkdir -p "$STAGE/bin" "$STAGE/share"
+mkdir -p "$STAGE/bin" "$STAGE/libexec" "$STAGE/share"
 chmod 0755 "$STAGE" "$STAGE/bin" "$STAGE/share"
 
 install -m 0755 "$SOURCE/bin/vita-diag" "$STAGE/bin/vita-diag"
@@ -173,6 +173,7 @@ install -m 0755 "$SOURCE/bin/vita-toolkit-mount" "$STAGE/bin/vita-toolkit-mount"
 install -m 0755 "$SOURCE/bin/vita-storage" "$STAGE/bin/vita-storage"
 install -m 0755 "$SOURCE/bin/vita-fb" "$STAGE/bin/vita-fb"
 install -m 0755 "$SOURCE/bin/vita-bench" "$STAGE/bin/vita-bench"
+install -m 0755 "$SOURCE/bin/vita-bench.arm" "$STAGE/libexec/vita-bench.arm"
 install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
 install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
 install -m 0644 "$SOURCE/share/vita-bench.c" "$STAGE/share/vita-bench.c"
