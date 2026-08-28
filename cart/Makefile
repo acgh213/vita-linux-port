@@ -38,7 +38,7 @@ TARGET_BIN := $(BUILD_DIR)/pstv-demo-cart.arm
 PRODUCTION_SRC := $(CART_DIR)/provenance/v0.1/pstv-demo-cart.c
 PRODUCTION_BIN := $(BUILD_DIR)/pstv-demo-cart.v0.1.arm
 
-.PHONY: all host-sanitize test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-worker-pool test-photosensitivity host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
+.PHONY: all host-sanitize test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-worker-pool test-photosensitivity test-capture-flash-check host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
 
 FORCE:
 
@@ -73,6 +73,9 @@ test-worker-pool: $(WORKER_POOL_TEST_BIN)
 
 test-photosensitivity: $(PHOTOSENS_TEST_BIN)
 	"$(PHOTOSENS_TEST_BIN)"
+
+test-capture-flash-check:
+	"$(SHELL)" "$(CART_DIR)/tests/test_capture_flash_check.sh" "$(CART_DIR)"
 
 $(PHOTOSENS_TEST_BIN): $(CART_DIR)/tests/test_photosensitivity.c $(CANVAS_SRC) $(TRANSITION_SRC) $(SCENE_SRCS) $(CART_DIR)/include/cart/transition.h FORCE
 	@mkdir -p "$(BUILD_DIR)"
@@ -247,7 +250,7 @@ cross-verify: cross-build
 	@readelf -h "$(TARGET_BIN)" | grep -q 'Flags:.*hard-float ABI'
 	@if readelf -l "$(TARGET_BIN)" | grep -q 'INTERP'; then printf '%s\n' 'FAIL cross-verify: dynamic interpreter present' >&2; exit 1; fi
 
-test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-input-normalize test-worker-pool test-photosensitivity host-sanitize host-capture
+test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-input-normalize test-worker-pool test-photosensitivity test-capture-flash-check host-sanitize host-capture
 	"$(SHELL)" "$(CART_DIR)/tests/test_legacy_render.sh" --verify-only --compare-to "$(GENERATED_FIXTURES)"
 	@if [ "$${CART_IMMUTABILITY_GUARD:-}" != child ] && [ -z "$${CART_SKIP_IMMUTABILITY:-}" ]; then \
 		CART_IMMUTABILITY_GUARD=child CART_SKIP_IMMUTABILITY=1 \

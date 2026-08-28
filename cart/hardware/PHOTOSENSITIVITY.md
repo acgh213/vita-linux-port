@@ -181,14 +181,58 @@ cannot predict PSTV memory behaviour.
 
 The cart must **not** be viewed directly on first re-run. Required order:
 
-1. Capture the PSTV output to video with nobody watching live.
-2. Run the recording through the same luminance analysis used in
-   `tests/test_photosensitivity.c`. On-device results must match host
-   predictions.
-3. Only after the capture measures clean does anyone watch it.
+1. **Record the PSTV output to video. Nobody watches live.**
+2. **Run the recording through `scripts/capture-flash-check.py`.**
+
+   ```sh
+   python3 scripts/capture-flash-check.py capture.mp4 --grid 4 --json report.json
+   ```
+
+   Exit codes: `0` clean, `1` flash pairs present, `2` rate limit exceeded,
+   `3` input/tooling error. Anything other than 0 means nobody watches it.
+
+3. **Only after the capture measures clean does anyone view the footage.**
 
 This inverts the sequence that caused the original incident, where the failure
 mode was discovered by a person looking at it.
+
+### The checker is itself tested
+
+`make test-capture-flash-check` proves the checker can tell a hazard from a
+clean clip before its verdict is trusted. It generates sequences from the real
+renderer, encodes them to H.264, and asserts:
+
+| Fixture | Expected | Why |
+|---|---|---|
+| per-frame scene change | exit 2, rate exceeded | must catch defect 2's strobe |
+| repaired crossfade | exit 0, PASS | fix must survive encode/decode |
+| localized strobe, `--grid 0` | exit 0 | demonstrates the blind spot |
+| localized strobe, `--grid 4` | exit 2 | grid must catch what the average misses |
+
+**Always pass `--grid` (default 4).** A whole-frame average is not sufficient:
+measured on a quarter-screen 30 Hz full-brightness strobe, the global average
+reads 0.0623 and reports PASS, while grid cell r0c0 reads **0.9962 at 30
+flashes/sec**. A localized flash is invisible to global averaging.
+
+### Measured verdicts on synthetic captures
+
+| Capture | Worst Δ | Flashes | Exit |
+|---|---|---|---|
+| per-frame strobe (defect 2) | 0.4487 | 30/sec | 2 |
+| hard cuts (original B5) | 0.4153 | 5 pairs | 1 |
+| repaired crossfade | **0.0478** | **0** | **0** |
+
+The repaired cart passes at 48% of threshold *after* H.264 encode and decode,
+so the fix survives the capture pipeline and not merely the renderer.
+
+### Why linear-light downscaling
+
+WCAG relative luminance is the mean of a **nonlinear** per-pixel function.
+Averaging sRGB bytes and then linearizing gives a different number. The script
+uses ffmpeg `zscale=t=linear` to convert to linear light **before** the resize,
+so the downscaled mean equals the full-resolution mean. It also pins
+`min=bt709:pin=bt709:tin=bt709` because capture files frequently carry no
+colorspace tags and zscale otherwise fails with "no path between colorspaces".
 
 ---
 
