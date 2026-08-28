@@ -4,8 +4,11 @@ set -eu
 
 SOURCE=toolkit
 OUTPUT=dist/vita-toolkit.squashfs
+STAGE_OUTPUT=
 TOOLCHAIN_ROOT=
 VERIFY=
+PUBLISH=
+MKSQUASHFS=${MKSQUASHFS:-mksquashfs}
 FORCE=0
 MODE=build
 
@@ -15,6 +18,7 @@ usage() {
         '  --source DIR          toolkit source tree (default: toolkit)' \
         '  --toolchain-root DIR  verified generated native-toolchain tree' \
         '  --output FILE         SquashFS output (default: dist/vita-toolkit.squashfs)' \
+        '  --stage-output DIR    publish verified root without creating SquashFS' \
         '  --force               replace an existing output' \
         '  --dry-run             print the image command without running it' \
         '  --manifest-only       print the staged manifest and exit'
@@ -31,6 +35,9 @@ while [ "$#" -gt 0 ]; do
         --output)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
             OUTPUT=$2; shift 2 ;;
+        --stage-output)
+            [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+            STAGE_OUTPUT=$2; MODE=stage; shift 2 ;;
         --force) FORCE=1; shift ;;
         --dry-run) MODE=dry-run; shift ;;
         --manifest-only) MODE=manifest; shift ;;
@@ -74,7 +81,8 @@ if [ -n "$TOOLCHAIN_ROOT" ]; then
     [ -d "$TOOLCHAIN_ROOT" ] || { printf 'missing toolchain root: %s\n' "$TOOLCHAIN_ROOT" >&2; exit 1; }
     TOOLCHAIN_MANIFEST=$TOOLCHAIN_ROOT/NATIVE-TOOLCHAIN-MANIFEST
     [ -f "$TOOLCHAIN_MANIFEST" ] || { printf 'missing toolchain manifest: %s\n' "$TOOLCHAIN_MANIFEST" >&2; exit 1; }
-    for required in bin/tcc lib/tcc/libtcc1.a lib/tcc/include/tccdefs.h \
+    for required in bin/tcc bin/cc toolchain-env.sh lib/tcc/libtcc1.a \
+                    lib/tcc/runmain.o lib/tcc/include/tccdefs.h lib/tcc/include/tcclib.h \
                     sysroot/usr/include/stdio.h sysroot/usr/lib/crt1.o \
                     sysroot/usr/lib/libc.so share/native-toolchain/BUILD-INFO; do
         [ -e "$TOOLCHAIN_ROOT/$required" ] || { printf 'toolchain manifest root lacks %s\n' "$required" >&2; exit 1; }
@@ -136,17 +144,26 @@ if [ -n "$TOOLCHAIN_ROOT" ]; then
     fi
 fi
 
-if [ "$MODE" != manifest ] && [ "$FORCE" -ne 1 ] && [ -e "$OUTPUT" ]; then
-    printf 'refusing to overwrite existing output: %s\n' "$OUTPUT" >&2
-    exit 1
-fi
-if [ "$MODE" != manifest ] && [ "$MODE" != dry-run ] && ! command -v mksquashfs >/dev/null 2>&1; then
-    printf 'mksquashfs is required for image creation\n' >&2
+case "$MODE" in
+    build|dry-run)
+        if [ "$FORCE" -ne 1 ] && [ -e "$OUTPUT" ]; then
+            printf 'refusing to overwrite existing output: %s\n' "$OUTPUT" >&2
+            exit 1
+        fi ;;
+    stage)
+        [ -n "$STAGE_OUTPUT" ] || { printf '%s\n' 'missing stage output path' >&2; exit 2; }
+        if [ "$FORCE" -ne 1 ] && [ -e "$STAGE_OUTPUT" ]; then
+            printf 'refusing to overwrite existing stage output: %s\n' "$STAGE_OUTPUT" >&2
+            exit 1
+        fi ;;
+esac
+if [ "$MODE" = build ] && ! command -v "$MKSQUASHFS" >/dev/null 2>&1; then
+    printf 'mksquashfs is required for image creation: %s\n' "$MKSQUASHFS" >&2
     exit 1
 fi
 
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/vita-toolkit-stage.XXXXXX")
-trap 'rm -rf "$VERIFY" "$STAGE"' 0 HUP INT TERM
+trap 'rm -rf "$VERIFY" "$STAGE" "$PUBLISH"' 0 HUP INT TERM
 mkdir -p "$STAGE/bin" "$STAGE/share"
 chmod 0755 "$STAGE" "$STAGE/bin" "$STAGE/share"
 
@@ -192,11 +209,33 @@ if [ "$MODE" = manifest ]; then
     exit 0
 fi
 
+if [ "$MODE" = stage ]; then
+    STAGE_PARENT=$(dirname "$STAGE_OUTPUT")
+    mkdir -p "$STAGE_PARENT"
+    PUBLISH=$(mktemp -d "$STAGE_PARENT/.vita-toolkit-stage.XXXXXX")
+    mkdir -p "$PUBLISH/root"
+    cp -a "$STAGE/." "$PUBLISH/root/"
+    BACKUP=
+    if [ -e "$STAGE_OUTPUT" ]; then
+        BACKUP=$STAGE_PARENT/.vita-toolkit-stage.backup.$$
+        mv "$STAGE_OUTPUT" "$BACKUP"
+    fi
+    if mv "$PUBLISH/root" "$STAGE_OUTPUT"; then
+        [ -z "$BACKUP" ] || rm -rf "$BACKUP"
+    else
+        [ -z "$BACKUP" ] || mv "$BACKUP" "$STAGE_OUTPUT"
+        exit 1
+    fi
+    printf 'stage_output=%s\n' "$STAGE_OUTPUT"
+    printf 'files=%s\n' "$(wc -l < "$STAGE_OUTPUT/MANIFEST" | tr -d ' ')"
+    exit 0
+fi
+
 mkdir -p "${OUTPUT%/*}"
 if [ "${OUTPUT%/*}" = "$OUTPUT" ]; then
     mkdir -p .
 fi
-CMD="mksquashfs $STAGE $OUTPUT -noappend -all-root -no-xattrs -mkfs-time 0 -all-time 0 -processors 1 -comp zstd -Xcompression-level 19 -no-progress"
+CMD="$MKSQUASHFS $STAGE $OUTPUT -noappend -all-root -no-xattrs -mkfs-time 0 -all-time 0 -processors 1 -comp zstd -Xcompression-level 19 -no-progress"
 if [ "$MODE" = dry-run ]; then
     printf '%s\n' "$CMD"
     printf 'manifest:\n'
@@ -204,7 +243,7 @@ if [ "$MODE" = dry-run ]; then
     exit 0
 fi
 
-mksquashfs "$STAGE" "$OUTPUT" \
+"$MKSQUASHFS" "$STAGE" "$OUTPUT" \
     -noappend -all-root -no-xattrs -mkfs-time 0 -all-time 0 \
     -processors 1 -comp zstd -Xcompression-level 19 -no-progress
 printf 'output=%s\n' "$OUTPUT"

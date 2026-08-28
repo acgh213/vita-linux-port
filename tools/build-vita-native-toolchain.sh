@@ -6,7 +6,7 @@
 # because TinyCC's build is in-tree; the pinned checkout is never modified.
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 TCC_SOURCE=
 SYSROOT=
 OUTPUT=dist/vita-native-toolchain
@@ -108,6 +108,8 @@ cp -a "$TCC_SOURCE/." "$BUILD/src/"
         --crtprefix='{R}/usr/lib' \
         --elfinterp=/lib/ld-linux-armhf.so.3 \
         --config-predefs=no \
+        --config-backtrace=no \
+        --config-bcheck=no \
         --extra-cflags='-O2 -static -march=armv7-a -mfpu=neon -mfloat-abi=hard' \
         --extra-ldflags='-static'
     make -j"$JOBS" tcc CC="$CC" AR="$AR" \
@@ -119,8 +121,12 @@ cp -a "$TCC_SOURCE/." "$BUILD/src/"
 
 TCC_BUILD="$BUILD/src/tcc"
 LIBTCC1_BUILD="$BUILD/src/libtcc1.a"
+RUNMAIN_BUILD="$BUILD/src/runmain.o"
+TCCLIB_HEADER="$BUILD/src/tcclib.h"
 [ -x "$TCC_BUILD" ] || { printf '%s\n' 'TinyCC build did not produce tcc' >&2; exit 1; }
 [ -f "$LIBTCC1_BUILD" ] || { printf '%s\n' 'TinyCC build did not produce libtcc1.a' >&2; exit 1; }
+[ -f "$RUNMAIN_BUILD" ] || { printf '%s\n' 'TinyCC build did not produce runmain.o' >&2; exit 1; }
+[ -f "$TCCLIB_HEADER" ] || { printf '%s\n' 'TinyCC source lacks tcclib.h' >&2; exit 1; }
 file "$TCC_BUILD" | grep -q 'ELF 32-bit.*ARM' \
     || { printf '%s\n' 'TinyCC output is not a 32-bit ARM ELF' >&2; exit 1; }
 if "$READELF" -l "$TCC_BUILD" | grep -q 'Requesting program interpreter'; then
@@ -137,10 +143,23 @@ chmod 0755 "$DEST" "$DEST/bin" "$DEST/lib" "$DEST/lib/tcc" \
     "$DEST/sysroot/usr/include" "$DEST/sysroot/usr/lib" \
     "$DEST/share" "$DEST/share/native-toolchain"
 install -m 0755 "$TCC_BUILD" "$DEST/bin/tcc"
+ln -s tcc "$DEST/bin/cc"
 install -m 0644 "$LIBTCC1_BUILD" "$DEST/lib/tcc/libtcc1.a"
+install -m 0644 "$RUNMAIN_BUILD" "$DEST/lib/tcc/runmain.o"
 cp -a "$BUILD/src/include/." "$DEST/lib/tcc/include/"
+install -m 0644 "$TCCLIB_HEADER" "$DEST/lib/tcc/include/tcclib.h"
 cp -a "$SYSROOT/include/." "$DEST/sysroot/usr/include/"
 cp -a "$SYSROOT/lib/." "$DEST/sysroot/usr/lib/"
+
+cat >"$DEST/toolchain-env.sh" <<'EOF'
+# Source this file to activate the Vita Linux native C toolchain.
+: "${VITA_TOOLKIT_ROOT:=/opt/vita-toolkit}"
+PATH=$VITA_TOOLKIT_ROOT/bin:$PATH
+CC=cc
+TCC=$VITA_TOOLKIT_ROOT/bin/tcc
+export VITA_TOOLKIT_ROOT PATH CC TCC
+EOF
+chmod 0644 "$DEST/toolchain-env.sh"
 
 cat >"$DEST/share/native-toolchain/BUILD-INFO" <<EOF
 tcc_revision=$ACTUAL_REVISION
@@ -149,6 +168,9 @@ compiler_mount=/opt/vita-toolkit
 sysroot=/opt/vita-toolkit/sysroot
 elf_interpreter=/lib/ld-linux-armhf.so.3
 compiler_linkage=static
+output_linkage_default=dynamic
+static_output=unsupported-modern-glibc-arm-relocations
+tcc_run_stdio=call-fflush-before-return
 EOF
 
 hash_file() {

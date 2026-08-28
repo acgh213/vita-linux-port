@@ -28,6 +28,7 @@ cat >"$SRC/runtime.c" <<'EOF'
 int __fixture_runtime(void) { return 1; }
 EOF
 printf '/* fixture internal header */\n' >"$SRC/include/tccdefs.h"
+printf '/* fixture compiler builtins */\n' >"$SRC/tcclib.h"
 cat >"$SRC/configure" <<'EOF'
 #!/bin/sh
 # The production builder must pass every hard-float/sysroot contract option.
@@ -57,6 +58,7 @@ cat >"$SRC/lib/Makefile" <<'EOF'
 all:
 	$(CC) $(CFLAGS) -c ../runtime.c -o runtime.o
 	$(AR) rcs ../libtcc1.a runtime.o
+	cp runtime.o ../runmain.o
 EOF
 
 git -C "$SRC" init -q
@@ -85,8 +87,12 @@ after=$(git -C "$SRC" status --porcelain=v1)
 # Exact installed layout: payload root itself mounts at /opt/vita-toolkit.
 for path in \
     bin/tcc \
+    bin/cc \
+    toolchain-env.sh \
     lib/tcc/libtcc1.a \
+    lib/tcc/runmain.o \
     lib/tcc/include/tccdefs.h \
+    lib/tcc/include/tcclib.h \
     sysroot/usr/include/stdio.h \
     sysroot/usr/lib/crt1.o \
     sysroot/usr/lib/libc.so \
@@ -96,6 +102,11 @@ for path in \
     [ -f "$OUT/$path" ] || fail "missing staged path: $path"
 done
 [ -x "$OUT/bin/tcc" ] || fail 'staged tcc is not executable'
+if [ ! -L "$OUT/bin/cc" ] || [ "$(readlink "$OUT/bin/cc")" != tcc ]; then
+    fail 'bin/cc must be a relative symlink to tcc'
+fi
+VITA_TOOLKIT_ROOT="$OUT" sh -c     '. "$VITA_TOOLKIT_ROOT/toolchain-env.sh"; [ "$CC" = cc ]; [ "$(command -v cc)" = "$VITA_TOOLKIT_ROOT/bin/cc" ]' \
+    || fail 'toolchain-env.sh does not activate the native compiler'
 file "$OUT/bin/tcc" | grep -q 'ELF 32-bit.*ARM' \
     || fail 'staged tcc is not a 32-bit ARM ELF'
 arm-linux-gnueabihf-readelf -l "$OUT/bin/tcc" | grep -qv 'Requesting program interpreter' \
@@ -105,7 +116,8 @@ arm-linux-gnueabihf-readelf -l "$OUT/bin/tcc" | grep -qv 'Requesting program int
 # credentials. Every ordinary file except the manifest itself is represented.
 LC_ALL=C sort -c "$OUT/NATIVE-TOOLCHAIN-MANIFEST" \
     || fail 'native toolchain manifest is not sorted'
-for path in bin/tcc lib/tcc/libtcc1.a sysroot/usr/include/stdio.h \
+for path in bin/tcc bin/cc toolchain-env.sh lib/tcc/libtcc1.a \
+            lib/tcc/runmain.o lib/tcc/include/tcclib.h sysroot/usr/include/stdio.h \
             sysroot/usr/lib/libc.so share/native-toolchain/BUILD-INFO; do
     grep -F "$path " "$OUT/NATIVE-TOOLCHAIN-MANIFEST" >/dev/null \
         || fail "manifest omits $path"
