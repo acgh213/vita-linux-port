@@ -56,6 +56,22 @@ static uint32_t low_to[LW * LH];
 static struct cart_transition transition;
 static size_t displayed_scene;
 
+/* Presentation staging buffer.
+ *
+ * The cart's /dev/fb0 mapping is WRITE-COMBINING, not cached: simplefb maps
+ * it with ioremap_wc() (drivers/video/fbdev/simplefb.c) and fb_io_mmap()
+ * applies pgprot_framebuffer(), which resolves to pgprot_writecombine()
+ * (include/asm-generic/video.h). Write-combining memory has no read-allocate
+ * and merges stores through a small buffer, so the 172,800 scattered strided
+ * memcpys upscale() issues are close to a worst case for it, while a single
+ * linear sweep is the ideal pattern.
+ *
+ * Composing here first and then blitting once therefore both shortens the
+ * interval in which scanout can catch a half-written frame and suits the
+ * memory type. Note this is a pessimisation on a cached host framebuffer
+ * (measured +0.23 ms/frame) and a win only on the real target. */
+static uint32_t back[FW * FH];
+
 static void row_job(void *slot, int row_start, int row_end, uint64_t frame)
 {
     struct cart_scene_render_context *context = slot;
@@ -280,7 +296,8 @@ int main(int argc,char **argv)
         } else {
             render_frame((int)displayed_scene, runtime.frame);
         }
-        upscale(fb);
+        upscale(back);
+        memcpy(fb, back, (size_t)FW * FH * 4);
         rendered_frames++;
         if(rendered_frames-report_frame>=300){
             uint64_t elapsed_ns=now_ns-report_start_ns;
