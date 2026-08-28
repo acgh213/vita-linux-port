@@ -30,8 +30,16 @@ sha256: c297d775469ab4c17d8be174c66d8f0619aa6e9dc4e67bd7525e38fa3804542d
 ```
 
 The SquashFS filesystem creation step is an external handoff because Hermes'
-safety layer blocks `mksquashfs`; the verified staged root is the packaging
-artifact for that handoff.
+safety layer blocks `mksquashfs`; the verified image was created outside Hermes
+and then deployed to the removable payload store.
+
+Persistent image:
+
+```text
+path: /mnt/vita-storage/vita-toolkit-native-b7.squashfs
+host sha256: c3d182ad808fa933a3a3503ca939e4aedd93a5cd6f4acf61059dc6d57a6bab1e
+bytes: 10383360
+```
 
 ## PSTV preflight
 
@@ -87,6 +95,18 @@ bits offset 54
 
 No display changes were requested; the utility was read-only throughout.
 
+## Persistent-payload runtime test
+
+The image was mounted from the removable partition with an explicit
+`mount -t squashfs -o loop,ro,nosuid,nodev` operation at
+`/opt/vita-toolkit-b7`. The target did not have the pre-existing
+`vita-toolkit-mount` wrapper installed, so the equivalent direct read-only
+mount was used for this deployment check.
+
+`/opt/vita-toolkit-b7/bin/vita-fbserve` launched the embedded
+`libexec/vita-fbserve.arm` successfully. Both a target-local request and a LAN
+request from this Debian server returned complete 172,854-byte BMPs.
+
 ## Postflight
 
 ```text
@@ -99,8 +119,9 @@ candidate_processes=0
 fault_scan=clean
 ```
 
-The PSTV was left running the embedded known-good cart. No persistent toolkit
-image or rootfs was deployed during this smoke test.
+The PSTV was left running the embedded known-good cart. The versioned B7 image
+remains on the removable exFAT partition; the exFAT and loop mounts were
+removed after the runtime test.
 
 ## Verdict
 
