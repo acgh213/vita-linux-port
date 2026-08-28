@@ -171,6 +171,7 @@ install -m 0755 "$SOURCE/bin/vita-diag" "$STAGE/bin/vita-diag"
 install -m 0755 "$SOURCE/bin/vita-netdiag" "$STAGE/bin/vita-netdiag"
 install -m 0755 "$SOURCE/bin/vita-toolkit-mount" "$STAGE/bin/vita-toolkit-mount"
 install -m 0755 "$SOURCE/bin/vita-storage" "$STAGE/bin/vita-storage"
+install -m 0755 "$SOURCE/bin/vita-fb" "$STAGE/bin/vita-fb"
 install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
 install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
 

@@ -173,6 +173,30 @@ storage_1_mountpoint=NONE
 The displayed device name is informational. Any later mount operation must
 still be explicit and separately reviewed.
 
+## Fifth command: `vita-fb`
+
+`vita-fb` makes the simple framebuffer observable without making display writes
+implicit. It reads geometry, stride, pixel format, and fbcon ownership through
+sysfs:
+
+```sh
+vita-fb info --machine
+vita-fb capture /tmp/framebuffer.raw
+vita-fb restore /tmp/framebuffer.raw
+```
+
+Captures are written to a temporary sibling and published only after the exact
+`stride * height` byte count is present. Existing captures are never overwritten.
+Restore is an explicit operation: a short input is rejected before `/dev/fb0`
+is touched, fbcon is unbound only when it was originally bound, and its original
+ownership is restored even when the framebuffer write fails. The default PSTV
+frame is 1280x720 at 32 bpp with a 5120-byte stride, or 3,686,400 bytes in 900
+4-KiB blocks.
+
+The host test uses a fake sysfs and framebuffer root and covers complete and
+truncated captures/restores plus bound and unbound fbcon states. It does not
+require display output or hardware.
+
 ## Second command: `vita-netdiag`
 
 Read-only network inventory using the image's existing `eth0` and `mlan0`
@@ -195,8 +219,8 @@ Without `--probe`, it does not generate network traffic. It uses stable
 4. `vita-storage` — removable storage inventory without writes. **Done.**
 5. Native C toolchain — pinned ARM hard-float TinyCC + matched glibc 2.41
    development sysroot in the external payload. **Done.**
-6. `vita-fb` — framebuffer metadata, safe capture/restore, and scene/cart
-   ownership checks.
+6. `vita-fb` — framebuffer metadata, safe capture/restore, and fbcon ownership
+   checks. **Done.**
 7. `vita-bench` — NEON/cache/fill-rate measurements, including worker-pool
    scaling once the benchmark contract is settled.
 8. `vita-control` — a deliberately small local/network control surface for
