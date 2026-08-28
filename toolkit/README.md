@@ -282,6 +282,22 @@ mismatch. It does not expose a network listener. A future HTTP control layer
 must add authentication and preserve this validation/rate-limit policy before
 LAN mutation is enabled.
 
+## USB inventory command: `vita-usbinfo`
+
+`vita-usbinfo` reads USB device nodes from sysfs and reports topology, bus and
+device numbers, VID/PID, device class, negotiated speed, driver, manufacturer,
+product, runtime power state, block-device mappings, and mountpoints:
+
+```sh
+vita-usbinfo --machine
+```
+
+It includes USB root hubs and actual device nodes but skips interface entries.
+The output declares `usb_read_only=1`; the command does not write sysfs, touch
+VBUS, reset a controller, load a module, mount storage, or access partition
+contents. Missing or unavailable attributes are reported as `UNKNOWN` or
+`NONE` rather than inferred.
+
 ## Planned sequence
 
 1. `vita-diag` — machine identity and baseline evidence. **Done.**
@@ -298,6 +314,8 @@ LAN mutation is enabled.
 9. `vita-control` — local status and explicitly rate-limited scene advance.
    **Done.** Network mutation remains intentionally unimplemented pending
    authentication design.
+10. `vita-usbinfo` — read-only USB topology, device, and storage mapping.
+    **Done.**
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
 network tests are bounded; framebuffer writes require an explicit subcommand;

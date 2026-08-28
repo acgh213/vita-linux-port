@@ -1,0 +1,154 @@
+#!/bin/sh
+# Inventory USB devices and storage mappings without mutating the system.
+set -eu
+
+SYSFS_ROOT=${VITA_USB_SYSFS_ROOT:-/sys}
+DEV_ROOT=${VITA_USB_DEV_ROOT:-/dev}
+PROC_MOUNTS=${VITA_USB_PROC_MOUNTS:-/proc/mounts}
+MODE=pretty
+
+usage() {
+    printf '%s\n' \
+        'usage: vita-usbinfo [--machine]' \
+        '  --machine    stable key=value output'
+}
+
+if [ "${1:-}" = '--machine' ]; then
+    MODE=machine
+    shift
+fi
+[ "$#" -eq 0 ] || { usage >&2; exit 2; }
+[ -d "$SYSFS_ROOT/bus/usb/devices" ] || {
+    printf 'vita-usbinfo: missing USB sysfs root: %s\n' "$SYSFS_ROOT/bus/usb/devices" >&2
+    exit 1
+}
+[ -r "$PROC_MOUNTS" ] || {
+    printf 'vita-usbinfo: cannot read mount table: %s\n' "$PROC_MOUNTS" >&2
+    exit 1
+}
+
+read_value() {
+    file=$1
+    if [ ! -r "$file" ]; then
+        printf '%s' UNKNOWN
+        return
+    fi
+    value=$(tr '\r\n' ' ' < "$file" | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//')
+    [ -n "$value" ] || value=UNKNOWN
+    printf '%s' "$value"
+}
+
+parent_for() {
+    name=$1
+    case "$name" in
+        *.*) printf '%s' "${name%.*}" ;;
+        *-*) printf 'usb%s' "${name%%-*}" ;;
+        usb*) printf '%s' NONE ;;
+        *) printf '%s' UNKNOWN ;;
+    esac
+}
+
+driver_for() {
+    entry=$1
+    driver=$(readlink "$entry/driver" 2>/dev/null || true)
+    if [ -n "$driver" ]; then
+        printf '%s' "${driver##*/}"
+    else
+        printf '%s' NONE
+    fi
+}
+
+blocks_for() {
+    device_real=$1
+    blocks=
+    for block_entry in "$SYSFS_ROOT"/class/block/*/device; do
+        [ -e "$block_entry" ] || continue
+        block_real=$(readlink -f "$block_entry" 2>/dev/null || true)
+        case "$block_real" in
+            "$device_real"|"$device_real"/*)
+                block_path=${block_entry%/device}
+                block_name=${block_path##*/}
+                [ -e "$DEV_ROOT/$block_name" ] || continue
+                if [ -n "$blocks" ]; then
+                    blocks="$blocks,$block_name"
+                else
+                    blocks=$block_name
+                fi
+                ;;
+        esac
+    done
+    [ -n "$blocks" ] || blocks=NONE
+    printf '%s' "$blocks"
+}
+
+mounts_for() {
+    blocks=$1
+    mounts=
+    [ "$blocks" != NONE ] || { printf '%s' NONE; return; }
+    old_ifs=$IFS
+    IFS=,
+    for block in $blocks; do
+        mountpoint=$(awk -v device="/dev/$block" '$1 == device { print $2; exit }' "$PROC_MOUNTS")
+        [ -n "$mountpoint" ] || continue
+        if [ -n "$mounts" ]; then
+            mounts="$mounts,$mountpoint"
+        else
+            mounts=$mountpoint
+        fi
+    done
+    IFS=$old_ifs
+    [ -n "$mounts" ] || mounts=NONE
+    printf '%s' "$mounts"
+}
+
+count=0
+for entry in "$SYSFS_ROOT"/bus/usb/devices/*; do
+    [ -d "$entry" ] || continue
+    [ -f "$entry/idVendor" ] || continue
+    count=$((count + 1))
+done
+
+if [ "$MODE" = machine ]; then
+    printf 'schema=1\nusb_read_only=1\nusb_count=%s\n' "$count"
+else
+    printf 'USB devices: %s\n' "$count"
+fi
+
+index=1
+for entry in "$SYSFS_ROOT"/bus/usb/devices/*; do
+    [ -d "$entry" ] || continue
+    [ -f "$entry/idVendor" ] || continue
+    name=${entry##*/}
+    real_entry=$(readlink -f "$entry" 2>/dev/null || true)
+    [ -n "$real_entry" ] || real_entry=$entry
+    bus=$(read_value "$entry/busnum")
+    devnum=$(read_value "$entry/devnum")
+    vid=$(read_value "$entry/idVendor")
+    pid=$(read_value "$entry/idProduct")
+    class=$(read_value "$entry/bDeviceClass")
+    speed=$(read_value "$entry/speed")
+    manufacturer=$(read_value "$entry/manufacturer")
+    product=$(read_value "$entry/product")
+    runtime_status=$(read_value "$entry/power/runtime_status")
+    parent=$(parent_for "$name")
+    driver=$(driver_for "$entry")
+    blocks=$(blocks_for "$real_entry")
+    mounts=$(mounts_for "$blocks")
+
+    if [ "$MODE" = machine ]; then
+        printf 'usb_%s_name=%s\nusb_%s_parent=%s\nusb_%s_bus=%s\nusb_%s_devnum=%s\n' \
+            "$index" "$name" "$index" "$parent" "$index" "$bus" "$index" "$devnum"
+        printf 'usb_%s_vid=%s\nusb_%s_pid=%s\nusb_%s_class=%s\nusb_%s_speed=%s\n' \
+            "$index" "$vid" "$index" "$pid" "$index" "$class" "$index" "$speed"
+        printf 'usb_%s_manufacturer=%s\nusb_%s_product=%s\nusb_%s_driver=%s\n' \
+            "$index" "$manufacturer" "$index" "$product" "$index" "$driver"
+        printf 'usb_%s_runtime_status=%s\nusb_%s_block=%s\nusb_%s_mounts=%s\n' \
+            "$index" "$runtime_status" "$index" "$blocks" "$index" "$mounts"
+    else
+        printf '  %s: %s %s:%s class=%s speed=%s\n' "$name" "$product" "$vid" "$pid" "$class" "$speed"
+        printf '    parent=%s bus=%s devnum=%s driver=%s runtime=%s\n' \
+            "$parent" "$bus" "$devnum" "$driver" "$runtime_status"
+        printf '    manufacturer=%s blocks=%s mounts=%s\n' "$manufacturer" "$blocks" "$mounts"
+    fi
+    index=$((index + 1))
+done
