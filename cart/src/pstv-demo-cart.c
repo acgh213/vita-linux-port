@@ -191,7 +191,8 @@ int main(int argc,char **argv)
     }
     if (cart_runtime_init(&runtime, cart_scene_count(), now_ns,
                           UINT64_C(1000000000) / FPS,
-                          UINT64_C(8) * UINT64_C(1000000000)) != 0) {
+                          UINT64_C(8) * UINT64_C(1000000000),
+                          CART_RUNTIME_MIN_CHANGE_NS) != 0) {
         fprintf(stderr, "runtime initialization failed\n");
         cart_input_shutdown(&input);
         munmap(fb, FW * FH * 4);

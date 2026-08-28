@@ -14,7 +14,7 @@ static uint64_t add_saturating(uint64_t left, uint64_t right)
 
 int cart_runtime_init(struct cart_runtime *runtime, size_t scene_count,
                       uint64_t origin_ns, uint64_t frame_period_ns,
-                      uint64_t scene_period_ns)
+                      uint64_t scene_period_ns, uint64_t min_change_ns)
 {
     if (runtime == NULL || scene_count == 0 || frame_period_ns == 0 ||
         scene_period_ns == 0 || origin_ns >= UINT64_MAX - frame_period_ns)
@@ -25,9 +25,29 @@ int cart_runtime_init(struct cart_runtime *runtime, size_t scene_count,
     runtime->origin_ns = origin_ns;
     runtime->frame_period_ns = frame_period_ns;
     runtime->scene_period_ns = scene_period_ns;
+    runtime->min_change_ns = min_change_ns;
     runtime->next_deadline_ns = origin_ns + frame_period_ns;
     runtime->sleep_ns = frame_period_ns;
     return 0;
+}
+
+/* Photosensitivity guard. A zero cooldown disables rate limiting entirely,
+ * which preserves the original stepping semantics for tests. */
+static int change_allowed(const struct cart_runtime *runtime, uint64_t now_ns)
+{
+    if (runtime->min_change_ns == 0)
+        return 1;
+    if (!runtime->had_change)
+        return 1;
+    if (now_ns < runtime->last_change_ns)
+        return 0;
+    return now_ns - runtime->last_change_ns >= runtime->min_change_ns;
+}
+
+static void record_change(struct cart_runtime *runtime, uint64_t now_ns)
+{
+    runtime->last_change_ns = now_ns;
+    runtime->had_change = 1;
 }
 
 int cart_runtime_tick(struct cart_runtime *runtime, uint64_t now_ns)
@@ -77,8 +97,12 @@ void cart_runtime_request_next(struct cart_runtime *runtime, uint64_t now_ns,
 {
     if (runtime == NULL || runtime->scene_count == 0)
         return;
+    if (!change_allowed(runtime, now_ns))
+        return;
 
     runtime->manual_scene_index = (runtime->scene_index + 1) % runtime->scene_count;
+    if (runtime->manual_scene_index != runtime->scene_index)
+        record_change(runtime, now_ns);
     runtime->scene_index = runtime->manual_scene_index;
     if (hold_ns == 0) {
         runtime->manual_hold_active = 0;
@@ -93,9 +117,13 @@ void cart_runtime_request_previous(struct cart_runtime *runtime, uint64_t now_ns
 {
     if (runtime == NULL || runtime->scene_count == 0)
         return;
+    if (!change_allowed(runtime, now_ns))
+        return;
 
     runtime->manual_scene_index = (runtime->scene_index + runtime->scene_count - 1) %
                                   runtime->scene_count;
+    if (runtime->manual_scene_index != runtime->scene_index)
+        record_change(runtime, now_ns);
     runtime->scene_index = runtime->manual_scene_index;
     if (hold_ns == 0) {
         runtime->manual_hold_active = 0;
