@@ -172,8 +172,10 @@ install -m 0755 "$SOURCE/bin/vita-netdiag" "$STAGE/bin/vita-netdiag"
 install -m 0755 "$SOURCE/bin/vita-toolkit-mount" "$STAGE/bin/vita-toolkit-mount"
 install -m 0755 "$SOURCE/bin/vita-storage" "$STAGE/bin/vita-storage"
 install -m 0755 "$SOURCE/bin/vita-fb" "$STAGE/bin/vita-fb"
+install -m 0755 "$SOURCE/bin/vita-bench" "$STAGE/bin/vita-bench"
 install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
 install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
+install -m 0644 "$SOURCE/share/vita-bench.c" "$STAGE/share/vita-bench.c"
 
 if [ -n "$TOOLCHAIN_ROOT" ]; then
     while IFS= read -r rel; do

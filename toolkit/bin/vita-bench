@@ -1,0 +1,18 @@
+#!/bin/sh
+# Run the native benchmark core from the mounted toolkit payload.
+set -eu
+
+ROOT=${VITA_BENCH_ROOT:-/opt/vita-toolkit}
+CC=${VITA_BENCH_CC:-$ROOT/bin/cc}
+SOURCE=${VITA_BENCH_SOURCE:-$ROOT/share/vita-bench.c}
+
+[ -x "$CC" ] || {
+    printf 'vita-bench: compiler is not executable: %s\n' "$CC" >&2
+    exit 1
+}
+[ -f "$SOURCE" ] || {
+    printf 'vita-bench: benchmark source is missing: %s\n' "$SOURCE" >&2
+    exit 1
+}
+
+exec "$CC" -run "$SOURCE" "$@"

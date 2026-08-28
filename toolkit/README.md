@@ -197,6 +197,29 @@ The host test uses a fake sysfs and framebuffer root and covers complete and
 truncated captures/restores plus bound and unbound fbcon states. It does not
 require display output or hardware.
 
+## Benchmark command: `vita-bench`
+
+The benchmark is a small C program compiled by the payload's native `cc` at
+run time. It measures dependency-chain compute, private-buffer `memcpy`, and
+private-buffer `memset` across one, two, and four workers (or a selected worker
+count):
+
+```sh
+vita-bench --machine --quick
+vita-bench --machine --workers 4
+```
+
+`--quick` is a short smoke run; the default uses larger buffers and more
+rounds. Results are machine-readable `key=value` lines and include the online
+CPU range, buffer size, worker count, and MiB/s or Mops/s rates. The benchmark
+does not open `/dev/fb0` by default and reports `framebuffer=skipped`. The
+optional `--framebuffer` path performs one explicit full-frame write for
+measuring the display path; use it only when HDMI output changes are wanted.
+
+The workload is intentionally a measurement tool, not a cross-platform score:
+compare runs on the same device and record the governor, kernel, and payload
+hash with the result.
+
 ## Second command: `vita-netdiag`
 
 Read-only network inventory using the image's existing `eth0` and `mlan0`
@@ -221,8 +244,8 @@ Without `--probe`, it does not generate network traffic. It uses stable
    development sysroot in the external payload. **Done.**
 6. `vita-fb` — framebuffer metadata, safe capture/restore, and fbcon ownership
    checks. **Done.**
-7. `vita-bench` — NEON/cache/fill-rate measurements, including worker-pool
-   scaling once the benchmark contract is settled.
+7. `vita-bench` — compute, memory, framebuffer, and worker-scaling measurements.
+   **Done.**
 8. `vita-control` — a deliberately small local/network control surface for
    demos, with explicit read-only and mutating modes.
 
