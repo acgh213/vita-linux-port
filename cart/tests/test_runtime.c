@@ -278,6 +278,31 @@ static void test_zero_guard_preserves_legacy_stepping(void)
     expect(runtime.scene_index == 1, "zero guard still steps back twice");
 }
 
+static void test_auto_rotation_respects_recent_manual_change(void)
+{
+    struct cart_runtime runtime = guarded_runtime();
+
+    /* Step BACKWARD shortly before the automatic boundary, without a hold.
+     * Manual lands on scene 5 while the attract loop is about to select
+     * scene 1, so the two genuinely diverge and the test cannot pass by
+     * coincidence. */
+    cart_runtime_tick(&runtime, START + SCENE_PERIOD - STEP);
+    expect(runtime.scene_index == 0, "attract loop is on scene zero before boundary");
+    cart_runtime_request_previous(&runtime, START + SCENE_PERIOD - STEP, 0);
+    expect(runtime.scene_index == 5, "manual previous wraps to the last scene");
+
+    /* Crossing the automatic boundary inside the cooldown must not cut
+     * again — that would be two flashes in rapid succession. */
+    cart_runtime_tick(&runtime, START + SCENE_PERIOD);
+    expect(runtime.scene_index == 5,
+           "auto rotation defers while inside the change cooldown");
+
+    /* Once the cooldown expires the attract loop resumes normally. */
+    cart_runtime_tick(&runtime, START + SCENE_PERIOD - STEP + GUARD);
+    expect(runtime.scene_index == 1,
+           "auto rotation resumes after the cooldown expires");
+}
+
 int main(void)
 {
     test_fixed_step_progression();
@@ -294,6 +319,7 @@ int main(void)
     test_rate_limit_releases_after_interval();
     test_rate_limit_applies_to_previous();
     test_zero_guard_preserves_legacy_stepping();
+    test_auto_rotation_respects_recent_manual_change();
     printf("all runtime tests passed\n");
     return 0;
 }
