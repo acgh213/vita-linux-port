@@ -68,8 +68,18 @@ int cart_runtime_tick(struct cart_runtime *runtime, uint64_t now_ns)
     if (runtime->manual_hold_active) {
         runtime->scene_index = runtime->manual_scene_index;
     } else {
-        runtime->scene_index = (size_t)((elapsed_ns / runtime->scene_period_ns) %
-                                        runtime->scene_count);
+        size_t automatic = (size_t)((elapsed_ns / runtime->scene_period_ns) %
+                                    runtime->scene_count);
+
+        /* Photosensitivity guard: if the attract loop wants a different
+         * scene but we changed too recently, hold the current one until
+         * the cooldown expires rather than flashing twice in a row. */
+        if (automatic != runtime->scene_index) {
+            if (change_allowed(runtime, now_ns)) {
+                record_change(runtime, now_ns);
+                runtime->scene_index = automatic;
+            }
+        }
     }
 
     if (now_ns < runtime->next_deadline_ns) {
