@@ -1,0 +1,155 @@
+#!/bin/sh
+# Build and run small native programs inside an explicit work directory.
+set -eu
+
+ROOT=${VITA_DEV_ROOT:-/opt/vita-toolkit}
+ENV_FILE=${VITA_DEV_ENV_FILE:-$ROOT/toolchain-env.sh}
+CC_OVERRIDE=${VITA_DEV_CC:-}
+MODE=pretty
+
+usage() {
+    printf '%s\n' \
+        'usage: vita-dev info [--machine]' \
+        '       vita-dev build [--machine] --workdir DIR [--output PATH] SOURCE' \
+        '       vita-dev run [--machine] BINARY [ARG ...]'
+}
+
+fail() {
+    code=$1
+    message=$2
+    if [ "$MODE" = machine ]; then
+        printf 'status=%s\n' "$code"
+    else
+        printf 'vita-dev: %s\n' "$message" >&2
+    fi
+    exit 1
+}
+
+load_compiler() {
+    if [ -n "$CC_OVERRIDE" ]; then
+        CC=$CC_OVERRIDE
+    else
+        [ -f "$ENV_FILE" ] || fail missing_toolchain_env "missing toolchain environment: $ENV_FILE"
+        VITA_TOOLKIT_ROOT=$ROOT
+        export VITA_TOOLKIT_ROOT
+        # shellcheck disable=SC1090
+        . "$ENV_FILE"
+        CC=${CC:-cc}
+    fi
+    COMPILER_PATH=$(command -v "$CC" 2>/dev/null || true)
+    [ -n "$COMPILER_PATH" ] || fail compiler_not_found "compiler not found: $CC"
+    [ -x "$COMPILER_PATH" ] || fail compiler_not_executable "compiler is not executable: $COMPILER_PATH"
+}
+
+absolute_source() {
+    source=$1
+    [ -f "$source" ] || fail source_missing "source file not found: $source"
+    [ -r "$source" ] || fail source_unreadable "source file is not readable: $source"
+    source_dir=$(CDPATH='' cd -- "$(dirname "$source")" && pwd)
+    SOURCE_PATH=$source_dir/${source##*/}
+}
+
+prepare_workdir() {
+    [ -n "${WORKDIR:-}" ] || fail workdir_required 'build requires --workdir DIR'
+    mkdir -p "$WORKDIR" || fail workdir_unavailable "cannot create workdir: $WORKDIR"
+    WORKDIR=$(CDPATH='' cd -- "$WORKDIR" && pwd)
+    export WORKDIR
+}
+
+[ "$#" -gt 0 ] || { usage >&2; exit 2; }
+ACTION=$1
+shift
+
+case "$ACTION" in
+    info)
+        if [ "${1:-}" = '--machine' ]; then
+            MODE=machine
+            shift
+        fi
+        [ "$#" -eq 0 ] || { usage >&2; exit 2; }
+        load_compiler
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=info\ntoolchain_root=%s\ncompiler=%s\ncompiler_path=%s\n' \
+                "$ROOT" "$CC" "$COMPILER_PATH"
+            printf 'dynamic_linking=1\nstatic_linking=unsupported\ndefault_workdir=/tmp/vita-dev\n'
+        else
+            printf 'toolchain root: %s\ncompiler: %s\ncompiler path: %s\n' "$ROOT" "$CC" "$COMPILER_PATH"
+            printf '%s\n' 'dynamic linking: supported; static linking: unsupported'
+        fi
+        ;;
+    build)
+        MODE=pretty
+        WORKDIR=${VITA_DEV_WORKDIR:-}
+        OUTPUT=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --machine) MODE=machine ;;
+                --workdir)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    WORKDIR=$2
+                    shift
+                    ;;
+                --output)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    OUTPUT=$2
+                    shift
+                    ;;
+                --help|-h) usage; exit 0 ;;
+                -*) usage >&2; exit 2 ;;
+                *)
+                    [ -z "${SOURCE_ARG:-}" ] || { usage >&2; exit 2; }
+                    SOURCE_ARG=$1
+                    ;;
+            esac
+            shift
+        done
+        [ -n "${SOURCE_ARG:-}" ] || { usage >&2; exit 2; }
+        load_compiler
+        absolute_source "$SOURCE_ARG"
+        prepare_workdir
+        if [ -z "$OUTPUT" ]; then
+            base=${SOURCE_PATH##*/}
+            stem=${base%.*}
+            [ "$stem" != "$base" ] || stem=$base
+            OUTPUT=$WORKDIR/$stem
+        elif [ "${OUTPUT#/}" = "$OUTPUT" ]; then
+            OUTPUT=$WORKDIR/$OUTPUT
+        fi
+        case "$OUTPUT" in
+            "$WORKDIR"/*) ;;
+            *) fail output_outside_workdir "output must be inside workdir: $WORKDIR" ;;
+        esac
+        TMPDIR=$WORKDIR
+        export TMPDIR
+        "$CC" "$SOURCE_PATH" -o "$OUTPUT" || fail compile_failed "compiler failed"
+        [ -x "$OUTPUT" ] || fail output_not_executable "compiler did not produce an executable: $OUTPUT"
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=build\nstatus=built\nsource=%s\noutput=%s\nworkdir=%s\ncompiler=%s\n' \
+                "$SOURCE_PATH" "$OUTPUT" "$WORKDIR" "$CC"
+        else
+            printf 'built: %s\noutput: %s\n' "$SOURCE_PATH" "$OUTPUT"
+        fi
+        ;;
+    run)
+        MODE=pretty
+        if [ "${1:-}" = '--machine' ]; then
+            MODE=machine
+            shift
+        fi
+        [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+        BINARY=$1
+        shift
+        [ -x "$BINARY" ] || fail binary_not_executable "binary is not executable: $BINARY"
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=run\nbinary=%s\n\n' "$BINARY"
+        fi
+        "$BINARY" "$@"
+        ;;
+    --help|-h)
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

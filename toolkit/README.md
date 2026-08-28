@@ -298,6 +298,25 @@ VBUS, reset a controller, load a module, mount storage, or access partition
 contents. Missing or unavailable attributes are reported as `UNKNOWN` or
 `NONE` rather than inferred.
 
+## Native development runner: `vita-dev`
+
+`vita-dev` makes the bundled ARM/TinyCC loop explicit and repeatable. `info`
+reports the active toolchain; `build` compiles one C source into an explicitly
+named work directory; `run` executes the resulting program and preserves its
+exit code:
+
+```sh
+vita-dev info --machine
+vita-dev build --machine --workdir /tmp/my-test hello.c
+vita-dev run /tmp/my-test/hello
+```
+
+Build outputs must remain inside `--workdir`, and compiler temporary files are
+placed there through `TMPDIR`. The runner supports the payload's normal dynamic
+linking contract and does not pretend that `cc -static` works with this TinyCC
+and glibc combination. It is a local command, not a service, and never writes
+to the read-only payload itself.
+
 ## Planned sequence
 
 1. `vita-diag` — machine identity and baseline evidence. **Done.**
@@ -315,6 +334,8 @@ contents. Missing or unavailable attributes are reported as `UNKNOWN` or
    **Done.** Network mutation remains intentionally unimplemented pending
    authentication design.
 10. `vita-usbinfo` — read-only USB topology, device, and storage mapping.
+    **Done.**
+11. `vita-dev` — explicit native compile/run loop in a work directory.
     **Done.**
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;

@@ -56,6 +56,7 @@ done
 [ -f "$SOURCE/bin/vita-control" ] || { printf 'missing source file: %s/bin/vita-control\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-control.arm" ] || { printf 'missing source file: %s/bin/vita-control.arm\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-usbinfo" ] || { printf 'missing source file: %s/bin/vita-usbinfo\n' "$SOURCE" >&2; exit 1; }
+[ -f "$SOURCE/bin/vita-dev" ] || { printf 'missing source file: %s/bin/vita-dev\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/share/vita-fbserve.c" ] || { printf 'missing source file: %s/share/vita-fbserve.c\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/share/vita-control.c" ] || { printf 'missing source file: %s/share/vita-control.c\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/squashfs/VERSION" ] || { printf 'missing source file: %s/squashfs/VERSION\n' "$SOURCE" >&2; exit 1; }
@@ -186,6 +187,7 @@ install -m 0755 "$SOURCE/bin/vita-fbserve.arm" "$STAGE/libexec/vita-fbserve.arm"
 install -m 0755 "$SOURCE/bin/vita-control" "$STAGE/bin/vita-control"
 install -m 0755 "$SOURCE/bin/vita-control.arm" "$STAGE/libexec/vita-control.arm"
 install -m 0755 "$SOURCE/bin/vita-usbinfo" "$STAGE/bin/vita-usbinfo"
+install -m 0755 "$SOURCE/bin/vita-dev" "$STAGE/bin/vita-dev"
 install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
 install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
 install -m 0644 "$SOURCE/share/vita-bench.c" "$STAGE/share/vita-bench.c"
