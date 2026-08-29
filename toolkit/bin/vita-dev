@@ -12,6 +12,7 @@ usage() {
         'usage: vita-dev info [--machine]' \
         '       vita-dev build [--machine] --workdir DIR [--output PATH] SOURCE' \
         '       vita-dev project [--machine] --workdir DIR [--output PATH] SOURCE...' \
+        '       vita-dev test [--machine] --workdir DIR [--output PATH] [--expect-status N] SOURCE...' \
         '       vita-dev run [--machine] BINARY [ARG ...]'
 }
 
@@ -208,6 +209,78 @@ case "$ACTION" in
         else
             printf 'built project: %s sources\noutput: %s\n' "$source_count" "$OUTPUT"
         fi
+        ;;
+    test)
+        MODE=pretty
+        WORKDIR=${VITA_DEV_WORKDIR:-}
+        OUTPUT=
+        EXPECTED_STATUS=0
+        SOURCE_ARGS=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --machine) MODE=machine ;;
+                --workdir)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    WORKDIR=$2
+                    shift
+                    ;;
+                --output)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    OUTPUT=$2
+                    shift
+                    ;;
+                --expect-status)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    EXPECTED_STATUS=$2
+                    shift
+                    ;;
+                --help|-h) usage; exit 0 ;;
+                -*) usage >&2; exit 2 ;;
+                *) SOURCE_ARGS="${SOURCE_ARGS}${1}
+" ;;
+            esac
+            shift
+        done
+        [ -n "$SOURCE_ARGS" ] || { usage >&2; exit 2; }
+        case "$EXPECTED_STATUS" in
+            ''|*[!0-9]*) fail invalid_expected_status 'expected status must be a non-negative integer' ;;
+        esac
+        prepare_workdir
+        SOURCE_LIST=$WORKDIR/.vita-dev-test-sources
+        printf '%s' "$SOURCE_ARGS" > "$SOURCE_LIST"
+        set --
+        while IFS= read -r source_arg; do
+            set -- "$@" "$source_arg"
+        done < "$SOURCE_LIST"
+        if [ -n "$OUTPUT" ]; then
+            PROJECT_OUTPUT=$(VITA_DEV_ROOT="$ROOT" VITA_DEV_CC="$CC_OVERRIDE" "$0" project --machine --workdir "$WORKDIR" --output "$OUTPUT" "$@") || fail build_failed 'project build failed'
+        else
+            PROJECT_OUTPUT=$(VITA_DEV_ROOT="$ROOT" VITA_DEV_CC="$CC_OVERRIDE" "$0" project --machine --workdir "$WORKDIR" "$@") || fail build_failed 'project build failed'
+        fi
+        rm -f "$SOURCE_LIST"
+        OUTPUT_PATH=$(printf '%s\n' "$PROJECT_OUTPUT" | awk -F= '$1 == "output" { print substr($0, index($0, "=") + 1) }')
+        [ -n "$OUTPUT_PATH" ] || fail output_missing 'project did not report an output path'
+        TEST_OUTPUT=$WORKDIR/.vita-dev-test-output
+        set +e
+        "$OUTPUT_PATH" > "$TEST_OUTPUT" 2>&1
+        RUN_STATUS=$?
+        set -e
+        if [ "$RUN_STATUS" = "$EXPECTED_STATUS" ]; then
+            TEST_STATUS=pass
+            TEST_EXIT=0
+        else
+            TEST_STATUS=fail
+            TEST_EXIT=1
+        fi
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=test\nstatus=%s\nsource_count=%s\noutput=%s\nworkdir=%s\nexpected_status=%s\nrun_status=%s\nstdout_file=%s\n' \
+                "$TEST_STATUS" "$(printf '%s\n' "$PROJECT_OUTPUT" | awk -F= '$1 == "source_count" { print $2 }')" \
+                "$OUTPUT_PATH" "$WORKDIR" "$EXPECTED_STATUS" "$RUN_STATUS" "$TEST_OUTPUT"
+        else
+            cat "$TEST_OUTPUT"
+            printf 'test %s: expected=%s actual=%s\n' "$TEST_STATUS" "$EXPECTED_STATUS" "$RUN_STATUS"
+        fi
+        exit "$TEST_EXIT"
         ;;
     run)
         MODE=pretty

@@ -317,6 +317,19 @@ linking contract and does not pretend that `cc -static` works with this TinyCC
 and glibc combination. It is a local command, not a service, and never writes
 to the read-only payload itself.
 
+`test` compiles the same kind of local project, runs it, compares its exit
+status with an explicit expectation, and retains combined program output in the
+workdir:
+
+```sh
+vita-dev test --machine --workdir /tmp/my-test \
+  --expect-status 0 main.c helper.c
+```
+
+A passing test reports `status=pass`; an assertion mismatch reports
+`status=fail` and exits nonzero. Both records include the expected and observed
+statuses plus `stdout_file` for the captured output.
+
 ## Planned sequence
 
 1. `vita-diag` — machine identity and baseline evidence. **Done.**
@@ -338,6 +351,8 @@ to the read-only payload itself.
 11. `vita-dev` — explicit native compile/run loop in a work directory.
     **Done.**
 12. `vita-dev project` — multi-file compile, object link, and local test loop.
+    **Done.**
+13. `vita-dev test` — compile, run, and assert a project exit status.
     **Done.**
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
