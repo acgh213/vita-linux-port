@@ -298,6 +298,23 @@ VBUS, reset a controller, load a module, mount storage, or access partition
 contents. Missing or unavailable attributes are reported as `UNKNOWN` or
 `NONE` rather than inferred.
 
+## Input inventory command: `vita-inputinfo`
+
+`vita-inputinfo` reports Linux input event devices from sysfs without opening
+the event nodes. It is intentionally identity-first because event numbering
+differs between targets: the Vita 1000 currently exposes touchscreen as
+`event0` and buttons as `event1`, while the PSTV exposes buttons as `event0`.
+
+```sh
+vita-inputinfo --machine
+```
+
+Machine output includes the event node, device path, name, `phys` identity, and
+the kernel's `ev`, `key`, and `abs` capability bitmaps. The command declares
+`input_read_only=1`; it does not consume events, change input state, or assume
+that a particular event number represents buttons or touch. The later input
+watcher will rank devices by identity and capabilities before reading events.
+
 ## Native development runner: `vita-dev`
 
 `vita-dev` makes the bundled ARM/TinyCC loop explicit and repeatable. `info`
@@ -370,6 +387,8 @@ keys and duplicate singleton keys fail closed.
     **Done.**
 14. `vita-dev` manifests — declarative source lists and test expectations.
     **Done.**
+15. `vita-inputinfo` — read-only input event identity and capability inventory.
+    **In progress.**
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
 network tests are bounded; framebuffer writes require an explicit subcommand;

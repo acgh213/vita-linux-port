@@ -1,0 +1,81 @@
+#!/bin/sh
+# Inventory Linux input event devices without opening or mutating them.
+set -eu
+
+SYSFS_ROOT=${VITA_INPUT_SYSFS_ROOT:-/sys}
+MODE=pretty
+
+usage() {
+    printf '%s\n' \
+        'usage: vita-inputinfo [--machine]' \
+        '  --machine    stable key=value output'
+}
+
+if [ "${1:-}" = '--machine' ]; then
+    MODE=machine
+    shift
+fi
+[ "$#" -eq 0 ] || { usage >&2; exit 2; }
+[ -d "$SYSFS_ROOT/class/input" ] || {
+    printf 'vita-inputinfo: missing input sysfs root: %s\n' "$SYSFS_ROOT/class/input" >&2
+    exit 1
+}
+
+read_value() {
+    file=$1
+    if [ ! -r "$file" ]; then
+        printf '%s' UNKNOWN
+        return
+    fi
+    value=$(tr '\r\n\t' '   ' < "$file" | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//')
+    [ -n "$value" ] || value=UNKNOWN
+    printf '%s' "$value"
+}
+
+event_numbers() {
+    for entry in "$SYSFS_ROOT"/class/input/event*; do
+        [ -d "$entry" ] || continue
+        name=${entry##*/}
+        number=${name#event}
+        case "$number" in
+            ''|*[!0-9]*) continue ;;
+            *) printf '%s\n' "$number" ;;
+        esac
+    done | LC_ALL=C sort -n
+}
+
+EVENTS=$(event_numbers)
+count=0
+for number in $EVENTS; do
+    count=$((count + 1))
+done
+
+if [ "$MODE" = machine ]; then
+    printf 'schema=1\ninput_read_only=1\ninput_count=%s\n' "$count"
+else
+    printf 'Input event devices: %s\n' "$count"
+fi
+
+index=1
+for number in $EVENTS; do
+    entry=$SYSFS_ROOT/class/input/event$number
+    name=$(read_value "$entry/device/name")
+    phys=$(read_value "$entry/device/phys")
+    ev=$(read_value "$entry/device/capabilities/ev")
+    key=$(read_value "$entry/device/capabilities/key")
+    abs=$(read_value "$entry/device/capabilities/abs")
+    if [ "$MODE" = machine ]; then
+        printf 'input_%s_event=event%s\n' "$index" "$number"
+        printf 'input_%s_device=/dev/input/event%s\n' "$index" "$number"
+        printf 'input_%s_name=%s\n' "$index" "$name"
+        printf 'input_%s_phys=%s\n' "$index" "$phys"
+        printf 'input_%s_ev=%s\n' "$index" "$ev"
+        printf 'input_%s_key=%s\n' "$index" "$key"
+        printf 'input_%s_abs=%s\n' "$index" "$abs"
+    else
+        printf '  event%s: %s\n' "$number" "$name"
+        printf '    device=/dev/input/event%s phys=%s\n' "$number" "$phys"
+        printf '    ev=%s key=%s abs=%s\n' "$ev" "$key" "$abs"
+    fi
+    index=$((index + 1))
+done
