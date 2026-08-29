@@ -51,6 +51,50 @@ absolute_source() {
     SOURCE_PATH=$source_dir/${source##*/}
 }
 
+load_manifest() {
+    MANIFEST_DIR=$(CDPATH='' cd -- "$(dirname "$MANIFEST")" && pwd)
+    [ -f "$MANIFEST" ] || fail manifest_missing "manifest file not found: $MANIFEST"
+    MANIFEST_SOURCES=
+    MANIFEST_OUTPUT=
+    MANIFEST_EXPECTED=
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        case "$line" in
+            *=*)
+                key=${line%%=*}
+                value=${line#*=}
+                ;;
+            *) fail manifest_malformed 'manifest lines must use key=value' ;;
+        esac
+        case "$key" in
+            source)
+                [ -n "$value" ] || fail manifest_empty_source 'manifest source cannot be empty'
+                case "$value" in
+                    /*) resolved=$value ;;
+                    *) resolved=$MANIFEST_DIR/$value ;;
+                esac
+                MANIFEST_SOURCES="${MANIFEST_SOURCES}${resolved}
+"
+                ;;
+            output)
+                [ -n "$value" ] || fail manifest_empty_output 'manifest output cannot be empty'
+                [ -z "$MANIFEST_OUTPUT" ] || fail manifest_duplicate_output 'manifest output may appear only once'
+                MANIFEST_OUTPUT=$value
+                ;;
+            expect_status)
+                case "$value" in
+                    ''|*[!0-9]*) fail invalid_expected_status 'manifest expected status must be a non-negative integer' ;;
+                esac
+                [ -z "$MANIFEST_EXPECTED" ] || fail manifest_duplicate_expect 'manifest expect_status may appear only once'
+                MANIFEST_EXPECTED=$value
+                ;;
+            *) fail manifest_unknown_key "unknown manifest key: $key" ;;
+        esac
+    done < "$MANIFEST"
+}
+
 prepare_workdir() {
     [ -n "${WORKDIR:-}" ] || fail workdir_required 'build requires --workdir DIR'
     mkdir -p "$WORKDIR" || fail workdir_unavailable "cannot create workdir: $WORKDIR"
@@ -136,6 +180,7 @@ case "$ACTION" in
         MODE=pretty
         WORKDIR=${VITA_DEV_WORKDIR:-}
         OUTPUT=
+        MANIFEST=
         SOURCE_LIST=
         SOURCE_ARGS=
         OBJECT_LIST=
@@ -157,6 +202,11 @@ case "$ACTION" in
                     OUTPUT=$2
                     shift
                     ;;
+                --manifest)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    MANIFEST=$2
+                    shift
+                    ;;
                 --help|-h) usage; exit 0 ;;
                 -*) usage >&2; exit 2 ;;
                 *) SOURCE_ARGS="${SOURCE_ARGS}${1}
@@ -164,6 +214,12 @@ case "$ACTION" in
             esac
             shift
         done
+        if [ -n "$MANIFEST" ]; then
+            load_manifest
+            [ -z "$SOURCE_ARGS" ] || fail manifest_mixed_sources 'manifest and command-line sources cannot be combined'
+            SOURCE_ARGS=$MANIFEST_SOURCES
+            [ -n "$OUTPUT" ] || OUTPUT=$MANIFEST_OUTPUT
+        fi
         [ -n "$SOURCE_ARGS" ] || { usage >&2; exit 2; }
         load_compiler
         prepare_workdir
@@ -215,6 +271,8 @@ case "$ACTION" in
         WORKDIR=${VITA_DEV_WORKDIR:-}
         OUTPUT=
         EXPECTED_STATUS=0
+        EXPECTED_STATUS_SET=0
+        MANIFEST=
         SOURCE_ARGS=
         while [ "$#" -gt 0 ]; do
             case "$1" in
@@ -229,9 +287,15 @@ case "$ACTION" in
                     OUTPUT=$2
                     shift
                     ;;
+                --manifest)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    MANIFEST=$2
+                    shift
+                    ;;
                 --expect-status)
                     [ "$#" -ge 2 ] || { usage >&2; exit 2; }
                     EXPECTED_STATUS=$2
+                    EXPECTED_STATUS_SET=1
                     shift
                     ;;
                 --help|-h) usage; exit 0 ;;
@@ -241,6 +305,13 @@ case "$ACTION" in
             esac
             shift
         done
+        if [ -n "$MANIFEST" ]; then
+            load_manifest
+            [ -z "$SOURCE_ARGS" ] || fail manifest_mixed_sources 'manifest and command-line sources cannot be combined'
+            SOURCE_ARGS=$MANIFEST_SOURCES
+            [ -n "$OUTPUT" ] || OUTPUT=$MANIFEST_OUTPUT
+            [ "$EXPECTED_STATUS_SET" = 1 ] || [ -z "$MANIFEST_EXPECTED" ] || EXPECTED_STATUS=$MANIFEST_EXPECTED
+        fi
         [ -n "$SOURCE_ARGS" ] || { usage >&2; exit 2; }
         case "$EXPECTED_STATUS" in
             ''|*[!0-9]*) fail invalid_expected_status 'expected status must be a non-negative integer' ;;

@@ -330,6 +330,20 @@ A passing test reports `status=pass`; an assertion mismatch reports
 `status=fail` and exits nonzero. Both records include the expected and observed
 statuses plus `stdout_file` for the captured output.
 
+A project manifest keeps this loop ergonomic without becoming a shell script:
+
+```text
+output=demo
+source=src/main.c
+source=src/helper.c
+expect_status=0
+```
+
+Use it with `vita-dev project --manifest vita.project` or
+`vita-dev test --manifest vita.project`. Relative source paths are resolved
+from the manifest directory. Only the documented keys are accepted; unknown
+keys and duplicate singleton keys fail closed.
+
 ## Planned sequence
 
 1. `vita-diag` — machine identity and baseline evidence. **Done.**
@@ -353,6 +367,8 @@ statuses plus `stdout_file` for the captured output.
 12. `vita-dev project` — multi-file compile, object link, and local test loop.
     **Done.**
 13. `vita-dev test` — compile, run, and assert a project exit status.
+    **Done.**
+14. `vita-dev` manifests — declarative source lists and test expectations.
     **Done.**
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
