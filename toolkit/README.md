@@ -337,6 +337,8 @@ to the read-only payload itself.
     **Done.**
 11. `vita-dev` — explicit native compile/run loop in a work directory.
     **Done.**
+12. `vita-dev project` — multi-file compile, object link, and local test loop.
+    **Done.**
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
 network tests are bounded; framebuffer writes require an explicit subcommand;

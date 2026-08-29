@@ -19,6 +19,7 @@ printf '%s\n' "$manifest" | grep -F 'bin/vita-fbserve ' >/dev/null
 printf '%s\n' "$manifest" | grep -F 'bin/vita-control ' >/dev/null
 printf '%s\n' "$manifest" | grep -F 'bin/vita-usbinfo ' >/dev/null
 printf '%s\n' "$manifest" | grep -F 'bin/vita-dev ' >/dev/null
+printf '%s\n' "$manifest" | grep -F 'README.md ' >/dev/null
 printf '%s\n' "$manifest" | grep -F 'bin/vita-bench ' >/dev/null
 printf '%s\n' "$manifest" | grep -F 'libexec/vita-bench.arm ' >/dev/null
 printf '%s\n' "$manifest" | grep -F 'libexec/vita-fbserve.arm ' >/dev/null

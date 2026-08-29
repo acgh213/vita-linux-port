@@ -11,6 +11,7 @@ usage() {
     printf '%s\n' \
         'usage: vita-dev info [--machine]' \
         '       vita-dev build [--machine] --workdir DIR [--output PATH] SOURCE' \
+        '       vita-dev project [--machine] --workdir DIR [--output PATH] SOURCE...' \
         '       vita-dev run [--machine] BINARY [ARG ...]'
 }
 
@@ -128,6 +129,84 @@ case "$ACTION" in
                 "$SOURCE_PATH" "$OUTPUT" "$WORKDIR" "$CC"
         else
             printf 'built: %s\noutput: %s\n' "$SOURCE_PATH" "$OUTPUT"
+        fi
+        ;;
+    project)
+        MODE=pretty
+        WORKDIR=${VITA_DEV_WORKDIR:-}
+        OUTPUT=
+        SOURCE_LIST=
+        SOURCE_ARGS=
+        OBJECT_LIST=
+        cleanup_project() {
+            [ -z "$SOURCE_LIST" ] || rm -f "$SOURCE_LIST"
+            [ -z "$OBJECT_LIST" ] || rm -f "$OBJECT_LIST"
+        }
+        trap cleanup_project EXIT HUP INT TERM
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --machine) MODE=machine ;;
+                --workdir)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    WORKDIR=$2
+                    shift
+                    ;;
+                --output)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    OUTPUT=$2
+                    shift
+                    ;;
+                --help|-h) usage; exit 0 ;;
+                -*) usage >&2; exit 2 ;;
+                *) SOURCE_ARGS="${SOURCE_ARGS}${1}
+" ;;
+            esac
+            shift
+        done
+        [ -n "$SOURCE_ARGS" ] || { usage >&2; exit 2; }
+        load_compiler
+        prepare_workdir
+        SOURCE_LIST=$WORKDIR/.vita-dev-sources
+        printf '%s' "$SOURCE_ARGS" > "$SOURCE_LIST"
+        if [ -z "$OUTPUT" ]; then
+            OUTPUT=$WORKDIR/app
+        elif [ "${OUTPUT#/}" = "$OUTPUT" ]; then
+            OUTPUT=$WORKDIR/$OUTPUT
+        fi
+        case "$OUTPUT" in
+            "$WORKDIR"/*) ;;
+            *) fail output_outside_workdir "output must be inside workdir: $WORKDIR" ;;
+        esac
+        OBJECT_LIST=$WORKDIR/.vita-dev-objects
+        : > "$OBJECT_LIST"
+        TMPDIR=$WORKDIR
+        export TMPDIR
+        source_count=0
+        while IFS= read -r source_arg; do
+            absolute_source "$source_arg"
+            base=${SOURCE_PATH##*/}
+            stem=${base%.*}
+            [ "$stem" != "$base" ] || stem=$base
+            OBJECT=$WORKDIR/$stem.o
+            if grep -F -x "$OBJECT" "$OBJECT_LIST" >/dev/null 2>&1; then
+                fail object_collision "multiple sources produce the same object: $OBJECT"
+            fi
+            printf '%s\n' "$OBJECT" >> "$OBJECT_LIST"
+            "$CC" -c "$SOURCE_PATH" -o "$OBJECT" || fail compile_failed "compiler failed for $SOURCE_PATH"
+            [ -f "$OBJECT" ] || fail object_missing "compiler did not produce: $OBJECT"
+            source_count=$((source_count + 1))
+        done < "$SOURCE_LIST"
+        set --
+        while IFS= read -r OBJECT; do
+            set -- "$@" "$OBJECT"
+        done < "$OBJECT_LIST"
+        "$CC" "$@" -o "$OUTPUT" || fail link_failed "linker failed"
+        [ -x "$OUTPUT" ] || fail output_not_executable "linker did not produce an executable: $OUTPUT"
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=project\nstatus=built\nsource_count=%s\noutput=%s\nworkdir=%s\ncompiler=%s\n' \
+                "$source_count" "$OUTPUT" "$WORKDIR" "$CC"
+        else
+            printf 'built project: %s sources\noutput: %s\n' "$source_count" "$OUTPUT"
         fi
         ;;
     run)
