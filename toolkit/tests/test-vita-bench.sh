@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)
 TOOL="$ROOT/toolkit/bin/vita-bench"
 SOURCE="$ROOT/toolkit/share/vita-bench.c"
 TMP=$(mktemp -d)
@@ -35,6 +35,7 @@ printf '%s\n' "$out4" | grep -F 'framebuffer=skipped' >/dev/null
 
 # The installed wrapper must invoke the payload benchmark binary, while
 # leaving framebuffer access opt-in.
+# shellcheck disable=SC2016 # The generated fixture must expand variables when it runs.
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "$VITA_BENCH_TEST_LOG"\nprintf "binary_ok\\n"\n' > "$TMP/fake-bench"
 chmod +x "$TMP/fake-bench"
 mkdir -p "$TMP/toolkit/libexec"
