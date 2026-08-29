@@ -57,9 +57,12 @@ done
 [ -f "$SOURCE/bin/vita-control.arm" ] || { printf 'missing source file: %s/bin/vita-control.arm\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-usbinfo" ] || { printf 'missing source file: %s/bin/vita-usbinfo\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-inputinfo" ] || { printf 'missing source file: %s/bin/vita-inputinfo\n' "$SOURCE" >&2; exit 1; }
+[ -f "$SOURCE/bin/vita-inputwatch" ] || { printf 'missing source file: %s/bin/vita-inputwatch\n' "$SOURCE" >&2; exit 1; }
+[ -f "$SOURCE/bin/vita-inputwatch.arm" ] || { printf 'missing source file: %s/bin/vita-inputwatch.arm\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/bin/vita-dev" ] || { printf 'missing source file: %s/bin/vita-dev\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/share/vita-fbserve.c" ] || { printf 'missing source file: %s/share/vita-fbserve.c\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/share/vita-control.c" ] || { printf 'missing source file: %s/share/vita-control.c\n' "$SOURCE" >&2; exit 1; }
+[ -f "$SOURCE/share/vita-inputwatch.c" ] || { printf 'missing source file: %s/share/vita-inputwatch.c\n' "$SOURCE" >&2; exit 1; }
 [ -f "$SOURCE/squashfs/VERSION" ] || { printf 'missing source file: %s/squashfs/VERSION\n' "$SOURCE" >&2; exit 1; }
 
 hash_file() {
@@ -189,12 +192,15 @@ install -m 0755 "$SOURCE/bin/vita-control" "$STAGE/bin/vita-control"
 install -m 0755 "$SOURCE/bin/vita-control.arm" "$STAGE/libexec/vita-control.arm"
 install -m 0755 "$SOURCE/bin/vita-usbinfo" "$STAGE/bin/vita-usbinfo"
 install -m 0755 "$SOURCE/bin/vita-inputinfo" "$STAGE/bin/vita-inputinfo"
+install -m 0755 "$SOURCE/bin/vita-inputwatch" "$STAGE/bin/vita-inputwatch"
+install -m 0755 "$SOURCE/bin/vita-inputwatch.arm" "$STAGE/libexec/vita-inputwatch.arm"
 install -m 0755 "$SOURCE/bin/vita-dev" "$STAGE/bin/vita-dev"
 install -m 0644 "$SOURCE/squashfs/VERSION" "$STAGE/VERSION"
 install -m 0644 "$SOURCE/README.md" "$STAGE/share/README.md"
 install -m 0644 "$SOURCE/share/vita-bench.c" "$STAGE/share/vita-bench.c"
 install -m 0644 "$SOURCE/share/vita-fbserve.c" "$STAGE/share/vita-fbserve.c"
 install -m 0644 "$SOURCE/share/vita-control.c" "$STAGE/share/vita-control.c"
+install -m 0644 "$SOURCE/share/vita-inputwatch.c" "$STAGE/share/vita-inputwatch.c"
 
 if [ -n "$TOOLCHAIN_ROOT" ]; then
     while IFS= read -r rel; do

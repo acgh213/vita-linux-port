@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run the read-only ARM input watcher from the mounted toolkit payload.
+set -eu
+
+ROOT=${VITA_INPUTWATCH_ROOT:-/opt/vita-toolkit}
+BINARY=${VITA_INPUTWATCH_BINARY:-$ROOT/libexec/vita-inputwatch.arm}
+
+[ -x "$BINARY" ] || {
+    printf 'vita-inputwatch: watcher binary is not executable: %s\n' "$BINARY" >&2
+    exit 1
+}
+
+exec "$BINARY" "$@"

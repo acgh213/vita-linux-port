@@ -315,6 +315,25 @@ the kernel's `ev`, `key`, and `abs` capability bitmaps. The command declares
 that a particular event number represents buttons or touch. The later input
 watcher will rank devices by identity and capabilities before reading events.
 
+## Input watcher command: `vita-inputwatch`
+
+`vita-inputwatch` selects an input event node by its `phys` identity, opens it
+read-only and nonblocking, and reports bounded evdev records. It defaults to
+the Vita button identity and has an explicit time bound; `--max-events` gives
+tests and scripts a second deterministic stop condition:
+
+```sh
+vita-inputwatch --machine --phys vita_syscon_buttons \
+  --duration-ms 5000 --max-events 100
+```
+
+The static ARM watcher reports selected-device metadata, raw type/code/value
+records, key press/release/repeat counts, absolute-axis count, SYN_REPORT
+count, and `status=complete` or `status=timeout`. It never writes an input
+device, changes sysfs, controls the cart, or assumes event numbering. The
+default target is buttons; touch observation is an explicit future invocation
+using the discovered touchscreen identity.
+
 ## Native development runner: `vita-dev`
 
 `vita-dev` makes the bundled ARM/TinyCC loop explicit and repeatable. `info`
@@ -389,6 +408,8 @@ keys and duplicate singleton keys fail closed.
     **Done.**
 15. `vita-inputinfo` — read-only input event identity and capability inventory.
     **Done.** Hardware-validated on both the 3.65 Vita 1000 and 3.60 PSTV.
+16. `vita-inputwatch` — bounded, identity-selected raw input observation.
+    **In progress.**
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
 network tests are bounded; framebuffer writes require an explicit subcommand;
