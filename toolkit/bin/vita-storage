@@ -71,6 +71,7 @@ print_record() {
     record=$1
     old_ifs=$IFS
     IFS='|'
+    # shellcheck disable=SC2086 # Intentional field splitting on the record delimiter.
     set -- $record
     IFS=$old_ifs
     device=$1

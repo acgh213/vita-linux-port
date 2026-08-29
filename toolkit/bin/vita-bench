@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run the static ARM benchmark core from the mounted toolkit payload.
+set -eu
+
+ROOT=${VITA_BENCH_ROOT:-/opt/vita-toolkit}
+BINARY=${VITA_BENCH_BINARY:-$ROOT/libexec/vita-bench.arm}
+
+[ -x "$BINARY" ] || {
+    printf 'vita-bench: benchmark binary is not executable: %s\n' "$BINARY" >&2
+    exit 1
+}
+
+exec "$BINARY" "$@"

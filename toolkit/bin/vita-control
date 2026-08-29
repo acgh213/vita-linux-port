@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run the local PSTV demo-cart control core from the mounted toolkit payload.
+set -eu
+
+ROOT=${VITA_CONTROL_ROOT:-/opt/vita-toolkit}
+BINARY=${VITA_CONTROL_BINARY:-$ROOT/libexec/vita-control.arm}
+
+[ -x "$BINARY" ] || {
+    printf 'vita-control: control binary is not executable: %s\n' "$BINARY" >&2
+    exit 1
+}
+
+exec "$BINARY" "$@"

@@ -1,0 +1,157 @@
+#!/bin/sh
+# Safe framebuffer inspection, capture, and explicit restore.
+set -eu
+
+ROOT=${VITA_FB_ROOT:-/}
+FB=${VITA_FB_DEVICE:-/dev/fb0}
+BIND=${VITA_FB_BIND:-/sys/class/vtconsole/vtcon1/bind}
+ACTION=
+INPUT=
+MACHINE=0
+
+usage() {
+    printf '%s\n' \
+        'usage: vita-fb info [--machine]' \
+        '       vita-fb capture OUTPUT [--machine]' \
+        '       vita-fb restore INPUT [--machine]' \
+        '  info       read framebuffer geometry and ownership' \
+        '  capture    atomically save one complete framebuffer' \
+        '  restore    explicitly write a complete saved framebuffer' \
+        '  --machine  stable key=value output where applicable'
+}
+
+fail() {
+    printf 'vita-fb: %s\n' "$1" >&2
+    exit 1
+}
+
+root_path() {
+    case "$1" in
+        /*) printf '%s%s\n' "$ROOT" "$1" ;;
+        *) printf '%s/%s\n' "$ROOT" "$1" ;;
+    esac
+}
+
+read_value() {
+    file=$(root_path "$1")
+    [ -r "$file" ] || { printf 'UNKNOWN'; return 0; }
+    tr -d '\r\n' < "$file"
+}
+
+report() {
+    key=$1
+    value=$2
+    if [ "$MACHINE" -eq 1 ]; then
+        printf '%s=%s\n' "$key" "$value"
+    else
+        printf '%s: %s\n' "$key" "$value"
+    fi
+}
+
+valid_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+load_metadata() {
+    geometry=$(read_value /sys/class/graphics/fb0/virtual_size)
+    bits=$(read_value /sys/class/graphics/fb0/bits_per_pixel)
+    stride=$(read_value /sys/class/graphics/fb0/stride)
+    bind=$(read_value "$BIND")
+    case "$geometry" in
+        *,*) width=${geometry%,*}; height=${geometry#*,} ;;
+        *) fail "invalid framebuffer geometry: $geometry" ;;
+    esac
+    valid_number "$width" || fail "invalid framebuffer width: $width"
+    valid_number "$height" || fail "invalid framebuffer height: $height"
+    valid_number "$bits" || fail "invalid framebuffer bits per pixel: $bits"
+    valid_number "$stride" || fail "invalid framebuffer stride: $stride"
+    case "$bind" in
+        0|1) ;;
+        *) fail "invalid fbcon bind state: $bind" ;;
+    esac
+    FRAME_BYTES=$((stride * height))
+    [ "$FRAME_BYTES" -gt 0 ] || fail 'framebuffer size is zero'
+    [ $((FRAME_BYTES % 4096)) -eq 0 ] \
+        || fail "framebuffer size is not 4096-byte aligned: $FRAME_BYTES"
+    FRAME_BLOCKS=$((FRAME_BYTES / 4096))
+    FB_PATH=$(root_path "$FB")
+    BIND_PATH=$(root_path "$BIND")
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        info|capture|restore)
+            [ -z "$ACTION" ] || { usage >&2; exit 2; }
+            ACTION=$1; shift
+            if [ "$ACTION" != info ]; then
+                [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+                INPUT=$1; shift
+            fi ;;
+        --machine) MACHINE=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+
+[ -n "$ACTION" ] || { usage >&2; exit 2; }
+load_metadata
+
+case "$ACTION" in
+    info)
+        report schema 1
+        report device "$FB"
+        report name "$(read_value /sys/class/graphics/fb0/name)"
+        report geometry "$geometry"
+        report width "$width"
+        report height "$height"
+        report bits_per_pixel "$bits"
+        report stride_bytes "$stride"
+        report frame_bytes "$FRAME_BYTES"
+        report frame_blocks "$FRAME_BLOCKS"
+        report mode "$(read_value /sys/class/graphics/fb0/modes)"
+        report fbcon_bound "$bind"
+        ;;
+    capture)
+        [ -n "$INPUT" ] || { usage >&2; exit 2; }
+        [ ! -e "$INPUT" ] || fail "refusing to overwrite existing capture: $INPUT"
+        tmp="$INPUT.tmp.$$"
+        trap 'rm -f "$tmp"' 0 HUP INT TERM
+        dd if="$FB_PATH" of="$tmp" bs=4096 count="$FRAME_BLOCKS" 2>/dev/null \
+            || fail 'framebuffer capture failed'
+        actual=$(wc -c < "$tmp" | tr -d ' ')
+        [ "$actual" = "$FRAME_BYTES" ] \
+            || fail "short framebuffer capture: expected $FRAME_BYTES bytes, got $actual"
+        mv "$tmp" "$INPUT" || fail "cannot publish capture: $INPUT"
+        trap - 0 HUP INT TERM
+        report status captured
+        report output "$INPUT"
+        report bytes "$FRAME_BYTES"
+        report blocks "$FRAME_BLOCKS"
+        ;;
+    restore)
+        [ -r "$INPUT" ] || fail "restore input is not readable: $INPUT"
+        actual=$(wc -c < "$INPUT" | tr -d ' ')
+        [ "$actual" = "$FRAME_BYTES" ] \
+            || fail "refusing short restore: expected $FRAME_BYTES bytes, got $actual"
+        status=0
+        if [ "$bind" = 1 ]; then
+            printf '0\n' > "$BIND_PATH" || status=1
+        fi
+        if [ "$status" -eq 0 ]; then
+            dd if="$INPUT" of="$FB_PATH" bs=4096 count="$FRAME_BLOCKS" 2>/dev/null \
+                || status=1
+        fi
+        if [ "$bind" = 1 ]; then
+            printf '1\n' > "$BIND_PATH" || status=1
+        fi
+        [ "$status" -eq 0 ] || fail 'framebuffer restore failed'
+        report status restored
+        report input "$INPUT"
+        report bytes "$FRAME_BYTES"
+        report blocks "$FRAME_BLOCKS"
+        report fbcon_bound "$bind"
+        ;;
+esac
