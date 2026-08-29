@@ -52,3 +52,25 @@ was opened, no input was consumed, and no persistent files or device state were
 changed. The differing event numbering is now captured as a first-class target
 fact; later input watching must rank by `phys`/capabilities rather than assume
 an event number.
+
+## Persistent B14 payload gate
+
+After the B14 image was built externally, it was staged at
+`ur0:/linux-toolkit/vita-toolkit-native-b14.squashfs` on the Vita and on the
+PSTV removable exFAT payload store. The Vita image read back as:
+
+```text
+sha256=86a2e3a5056e2659729d39b3661afc282f0c7629e4f3f76556365bf9b15d786a
+bytes=10604544
+```
+
+The Vita then mounted `/dev/mmcblk0p12` and the B14 image read-only and ran the
+same inventory from `/opt/vita-toolkit`. The persistent gate passed with
+`input_count=2`, `cpu_online=0-3`, `faults=0`, and zero mounts after cleanup.
+
+The PSTV persistent gate also passed with `input_count=1`, `event0` identified
+as `vita_syscon_buttons`, cart PID `28289` unchanged, `fbcon=0`, four CPUs,
+clean fault state, and zero mounts after cleanup.
+
+The B14 image remains staged on both devices for subsequent read-only input
+watcher work.

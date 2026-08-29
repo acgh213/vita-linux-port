@@ -388,7 +388,7 @@ keys and duplicate singleton keys fail closed.
 14. `vita-dev` manifests — declarative source lists and test expectations.
     **Done.**
 15. `vita-inputinfo` — read-only input event identity and capability inventory.
-    **In progress.**
+    **Done.** Hardware-validated on both the 3.65 Vita 1000 and 3.60 PSTV.
 
 The toolkit's safety rule is simple: diagnostics are read-only by default;
 network tests are bounded; framebuffer writes require an explicit subcommand;
