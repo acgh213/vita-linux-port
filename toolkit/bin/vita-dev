@@ -1,0 +1,378 @@
+#!/bin/sh
+# Build and run small native programs inside an explicit work directory.
+set -eu
+
+ROOT=${VITA_DEV_ROOT:-/opt/vita-toolkit}
+ENV_FILE=${VITA_DEV_ENV_FILE:-$ROOT/toolchain-env.sh}
+CC_OVERRIDE=${VITA_DEV_CC:-}
+MODE=pretty
+
+usage() {
+    printf '%s\n' \
+        'usage: vita-dev info [--machine]' \
+        '       vita-dev build [--machine] --workdir DIR [--output PATH] SOURCE' \
+        '       vita-dev project [--machine] --workdir DIR [--output PATH] SOURCE...' \
+        '       vita-dev test [--machine] --workdir DIR [--output PATH] [--expect-status N] SOURCE...' \
+        '       vita-dev run [--machine] BINARY [ARG ...]'
+}
+
+fail() {
+    code=$1
+    message=$2
+    if [ "$MODE" = machine ]; then
+        printf 'status=%s\n' "$code"
+    else
+        printf 'vita-dev: %s\n' "$message" >&2
+    fi
+    exit 1
+}
+
+load_compiler() {
+    if [ -n "$CC_OVERRIDE" ]; then
+        CC=$CC_OVERRIDE
+    else
+        [ -f "$ENV_FILE" ] || fail missing_toolchain_env "missing toolchain environment: $ENV_FILE"
+        VITA_TOOLKIT_ROOT=$ROOT
+        export VITA_TOOLKIT_ROOT
+        # shellcheck disable=SC1090
+        . "$ENV_FILE"
+        CC=${CC:-cc}
+    fi
+    COMPILER_PATH=$(command -v "$CC" 2>/dev/null || true)
+    [ -n "$COMPILER_PATH" ] || fail compiler_not_found "compiler not found: $CC"
+    [ -x "$COMPILER_PATH" ] || fail compiler_not_executable "compiler is not executable: $COMPILER_PATH"
+}
+
+absolute_source() {
+    source=$1
+    [ -f "$source" ] || fail source_missing "source file not found: $source"
+    [ -r "$source" ] || fail source_unreadable "source file is not readable: $source"
+    source_dir=$(CDPATH='' cd -- "$(dirname "$source")" && pwd)
+    SOURCE_PATH=$source_dir/${source##*/}
+}
+
+load_manifest() {
+    MANIFEST_DIR=$(CDPATH='' cd -- "$(dirname "$MANIFEST")" && pwd)
+    [ -f "$MANIFEST" ] || fail manifest_missing "manifest file not found: $MANIFEST"
+    MANIFEST_SOURCES=
+    MANIFEST_OUTPUT=
+    MANIFEST_EXPECTED=
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        case "$line" in
+            *=*)
+                key=${line%%=*}
+                value=${line#*=}
+                ;;
+            *) fail manifest_malformed 'manifest lines must use key=value' ;;
+        esac
+        case "$key" in
+            source)
+                [ -n "$value" ] || fail manifest_empty_source 'manifest source cannot be empty'
+                case "$value" in
+                    /*) resolved=$value ;;
+                    *) resolved=$MANIFEST_DIR/$value ;;
+                esac
+                MANIFEST_SOURCES="${MANIFEST_SOURCES}${resolved}
+"
+                ;;
+            output)
+                [ -n "$value" ] || fail manifest_empty_output 'manifest output cannot be empty'
+                [ -z "$MANIFEST_OUTPUT" ] || fail manifest_duplicate_output 'manifest output may appear only once'
+                MANIFEST_OUTPUT=$value
+                ;;
+            expect_status)
+                case "$value" in
+                    ''|*[!0-9]*) fail invalid_expected_status 'manifest expected status must be a non-negative integer' ;;
+                esac
+                [ -z "$MANIFEST_EXPECTED" ] || fail manifest_duplicate_expect 'manifest expect_status may appear only once'
+                MANIFEST_EXPECTED=$value
+                ;;
+            *) fail manifest_unknown_key "unknown manifest key: $key" ;;
+        esac
+    done < "$MANIFEST"
+}
+
+prepare_workdir() {
+    [ -n "${WORKDIR:-}" ] || fail workdir_required 'build requires --workdir DIR'
+    mkdir -p "$WORKDIR" || fail workdir_unavailable "cannot create workdir: $WORKDIR"
+    WORKDIR=$(CDPATH='' cd -- "$WORKDIR" && pwd)
+    export WORKDIR
+}
+
+[ "$#" -gt 0 ] || { usage >&2; exit 2; }
+ACTION=$1
+shift
+
+case "$ACTION" in
+    info)
+        if [ "${1:-}" = '--machine' ]; then
+            MODE=machine
+            shift
+        fi
+        [ "$#" -eq 0 ] || { usage >&2; exit 2; }
+        load_compiler
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=info\ntoolchain_root=%s\ncompiler=%s\ncompiler_path=%s\n' \
+                "$ROOT" "$CC" "$COMPILER_PATH"
+            printf 'dynamic_linking=1\nstatic_linking=unsupported\ndefault_workdir=/tmp/vita-dev\n'
+        else
+            printf 'toolchain root: %s\ncompiler: %s\ncompiler path: %s\n' "$ROOT" "$CC" "$COMPILER_PATH"
+            printf '%s\n' 'dynamic linking: supported; static linking: unsupported'
+        fi
+        ;;
+    build)
+        MODE=pretty
+        WORKDIR=${VITA_DEV_WORKDIR:-}
+        OUTPUT=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --machine) MODE=machine ;;
+                --workdir)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    WORKDIR=$2
+                    shift
+                    ;;
+                --output)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    OUTPUT=$2
+                    shift
+                    ;;
+                --help|-h) usage; exit 0 ;;
+                -*) usage >&2; exit 2 ;;
+                *)
+                    [ -z "${SOURCE_ARG:-}" ] || { usage >&2; exit 2; }
+                    SOURCE_ARG=$1
+                    ;;
+            esac
+            shift
+        done
+        [ -n "${SOURCE_ARG:-}" ] || { usage >&2; exit 2; }
+        load_compiler
+        absolute_source "$SOURCE_ARG"
+        prepare_workdir
+        if [ -z "$OUTPUT" ]; then
+            base=${SOURCE_PATH##*/}
+            stem=${base%.*}
+            [ "$stem" != "$base" ] || stem=$base
+            OUTPUT=$WORKDIR/$stem
+        elif [ "${OUTPUT#/}" = "$OUTPUT" ]; then
+            OUTPUT=$WORKDIR/$OUTPUT
+        fi
+        case "$OUTPUT" in
+            "$WORKDIR"/*) ;;
+            *) fail output_outside_workdir "output must be inside workdir: $WORKDIR" ;;
+        esac
+        TMPDIR=$WORKDIR
+        export TMPDIR
+        "$CC" "$SOURCE_PATH" -o "$OUTPUT" || fail compile_failed "compiler failed"
+        [ -x "$OUTPUT" ] || fail output_not_executable "compiler did not produce an executable: $OUTPUT"
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=build\nstatus=built\nsource=%s\noutput=%s\nworkdir=%s\ncompiler=%s\n' \
+                "$SOURCE_PATH" "$OUTPUT" "$WORKDIR" "$CC"
+        else
+            printf 'built: %s\noutput: %s\n' "$SOURCE_PATH" "$OUTPUT"
+        fi
+        ;;
+    project)
+        MODE=pretty
+        WORKDIR=${VITA_DEV_WORKDIR:-}
+        OUTPUT=
+        MANIFEST=
+        SOURCE_LIST=
+        SOURCE_ARGS=
+        OBJECT_LIST=
+        cleanup_project() {
+            [ -z "$SOURCE_LIST" ] || rm -f "$SOURCE_LIST"
+            [ -z "$OBJECT_LIST" ] || rm -f "$OBJECT_LIST"
+        }
+        trap cleanup_project EXIT HUP INT TERM
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --machine) MODE=machine ;;
+                --workdir)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    WORKDIR=$2
+                    shift
+                    ;;
+                --output)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    OUTPUT=$2
+                    shift
+                    ;;
+                --manifest)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    MANIFEST=$2
+                    shift
+                    ;;
+                --help|-h) usage; exit 0 ;;
+                -*) usage >&2; exit 2 ;;
+                *) SOURCE_ARGS="${SOURCE_ARGS}${1}
+" ;;
+            esac
+            shift
+        done
+        if [ -n "$MANIFEST" ]; then
+            load_manifest
+            [ -z "$SOURCE_ARGS" ] || fail manifest_mixed_sources 'manifest and command-line sources cannot be combined'
+            SOURCE_ARGS=$MANIFEST_SOURCES
+            [ -n "$OUTPUT" ] || OUTPUT=$MANIFEST_OUTPUT
+        fi
+        [ -n "$SOURCE_ARGS" ] || { usage >&2; exit 2; }
+        load_compiler
+        prepare_workdir
+        SOURCE_LIST=$WORKDIR/.vita-dev-sources
+        printf '%s' "$SOURCE_ARGS" > "$SOURCE_LIST"
+        if [ -z "$OUTPUT" ]; then
+            OUTPUT=$WORKDIR/app
+        elif [ "${OUTPUT#/}" = "$OUTPUT" ]; then
+            OUTPUT=$WORKDIR/$OUTPUT
+        fi
+        case "$OUTPUT" in
+            "$WORKDIR"/*) ;;
+            *) fail output_outside_workdir "output must be inside workdir: $WORKDIR" ;;
+        esac
+        OBJECT_LIST=$WORKDIR/.vita-dev-objects
+        : > "$OBJECT_LIST"
+        TMPDIR=$WORKDIR
+        export TMPDIR
+        source_count=0
+        while IFS= read -r source_arg; do
+            absolute_source "$source_arg"
+            base=${SOURCE_PATH##*/}
+            stem=${base%.*}
+            [ "$stem" != "$base" ] || stem=$base
+            OBJECT=$WORKDIR/$stem.o
+            if grep -F -x "$OBJECT" "$OBJECT_LIST" >/dev/null 2>&1; then
+                fail object_collision "multiple sources produce the same object: $OBJECT"
+            fi
+            printf '%s\n' "$OBJECT" >> "$OBJECT_LIST"
+            "$CC" -c "$SOURCE_PATH" -o "$OBJECT" || fail compile_failed "compiler failed for $SOURCE_PATH"
+            [ -f "$OBJECT" ] || fail object_missing "compiler did not produce: $OBJECT"
+            source_count=$((source_count + 1))
+        done < "$SOURCE_LIST"
+        set --
+        while IFS= read -r OBJECT; do
+            set -- "$@" "$OBJECT"
+        done < "$OBJECT_LIST"
+        "$CC" "$@" -o "$OUTPUT" || fail link_failed "linker failed"
+        [ -x "$OUTPUT" ] || fail output_not_executable "linker did not produce an executable: $OUTPUT"
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=project\nstatus=built\nsource_count=%s\noutput=%s\nworkdir=%s\ncompiler=%s\n' \
+                "$source_count" "$OUTPUT" "$WORKDIR" "$CC"
+        else
+            printf 'built project: %s sources\noutput: %s\n' "$source_count" "$OUTPUT"
+        fi
+        ;;
+    test)
+        MODE=pretty
+        WORKDIR=${VITA_DEV_WORKDIR:-}
+        OUTPUT=
+        EXPECTED_STATUS=0
+        EXPECTED_STATUS_SET=0
+        MANIFEST=
+        SOURCE_ARGS=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --machine) MODE=machine ;;
+                --workdir)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    WORKDIR=$2
+                    shift
+                    ;;
+                --output)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    OUTPUT=$2
+                    shift
+                    ;;
+                --manifest)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    MANIFEST=$2
+                    shift
+                    ;;
+                --expect-status)
+                    [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+                    EXPECTED_STATUS=$2
+                    EXPECTED_STATUS_SET=1
+                    shift
+                    ;;
+                --help|-h) usage; exit 0 ;;
+                -*) usage >&2; exit 2 ;;
+                *) SOURCE_ARGS="${SOURCE_ARGS}${1}
+" ;;
+            esac
+            shift
+        done
+        if [ -n "$MANIFEST" ]; then
+            load_manifest
+            [ -z "$SOURCE_ARGS" ] || fail manifest_mixed_sources 'manifest and command-line sources cannot be combined'
+            SOURCE_ARGS=$MANIFEST_SOURCES
+            [ -n "$OUTPUT" ] || OUTPUT=$MANIFEST_OUTPUT
+            [ "$EXPECTED_STATUS_SET" = 1 ] || [ -z "$MANIFEST_EXPECTED" ] || EXPECTED_STATUS=$MANIFEST_EXPECTED
+        fi
+        [ -n "$SOURCE_ARGS" ] || { usage >&2; exit 2; }
+        case "$EXPECTED_STATUS" in
+            ''|*[!0-9]*) fail invalid_expected_status 'expected status must be a non-negative integer' ;;
+        esac
+        prepare_workdir
+        SOURCE_LIST=$WORKDIR/.vita-dev-test-sources
+        printf '%s' "$SOURCE_ARGS" > "$SOURCE_LIST"
+        set --
+        while IFS= read -r source_arg; do
+            set -- "$@" "$source_arg"
+        done < "$SOURCE_LIST"
+        if [ -n "$OUTPUT" ]; then
+            PROJECT_OUTPUT=$(VITA_DEV_ROOT="$ROOT" VITA_DEV_CC="$CC_OVERRIDE" "$0" project --machine --workdir "$WORKDIR" --output "$OUTPUT" "$@") || fail build_failed 'project build failed'
+        else
+            PROJECT_OUTPUT=$(VITA_DEV_ROOT="$ROOT" VITA_DEV_CC="$CC_OVERRIDE" "$0" project --machine --workdir "$WORKDIR" "$@") || fail build_failed 'project build failed'
+        fi
+        rm -f "$SOURCE_LIST"
+        OUTPUT_PATH=$(printf '%s\n' "$PROJECT_OUTPUT" | awk -F= '$1 == "output" { print substr($0, index($0, "=") + 1) }')
+        [ -n "$OUTPUT_PATH" ] || fail output_missing 'project did not report an output path'
+        TEST_OUTPUT=$WORKDIR/.vita-dev-test-output
+        set +e
+        "$OUTPUT_PATH" > "$TEST_OUTPUT" 2>&1
+        RUN_STATUS=$?
+        set -e
+        if [ "$RUN_STATUS" = "$EXPECTED_STATUS" ]; then
+            TEST_STATUS=pass
+            TEST_EXIT=0
+        else
+            TEST_STATUS=fail
+            TEST_EXIT=1
+        fi
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=test\nstatus=%s\nsource_count=%s\noutput=%s\nworkdir=%s\nexpected_status=%s\nrun_status=%s\nstdout_file=%s\n' \
+                "$TEST_STATUS" "$(printf '%s\n' "$PROJECT_OUTPUT" | awk -F= '$1 == "source_count" { print $2 }')" \
+                "$OUTPUT_PATH" "$WORKDIR" "$EXPECTED_STATUS" "$RUN_STATUS" "$TEST_OUTPUT"
+        else
+            cat "$TEST_OUTPUT"
+            printf 'test %s: expected=%s actual=%s\n' "$TEST_STATUS" "$EXPECTED_STATUS" "$RUN_STATUS"
+        fi
+        exit "$TEST_EXIT"
+        ;;
+    run)
+        MODE=pretty
+        if [ "${1:-}" = '--machine' ]; then
+            MODE=machine
+            shift
+        fi
+        [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+        BINARY=$1
+        shift
+        [ -x "$BINARY" ] || fail binary_not_executable "binary is not executable: $BINARY"
+        if [ "$MODE" = machine ]; then
+            printf 'schema=1\naction=run\nbinary=%s\n\n' "$BINARY"
+        fi
+        "$BINARY" "$@"
+        ;;
+    --help|-h)
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

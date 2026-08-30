@@ -61,11 +61,12 @@ while [ "$#" -gt 0 ]; do
         --device)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
             [ -z "$SOURCE_KIND" ] || { usage >&2; exit 2; }
-            SOURCE=$2; SOURCE_KIND=device; shift 2 ;;
+            SOURCE="$2"; SOURCE_KIND=device; shift 2 ;;
         --file)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
             [ -z "$SOURCE_KIND" ] || { usage >&2; exit 2; }
-            SOURCE=$2; SOURCE_KIND=file; shift 2 ;;
+            # shellcheck disable=SC2209 # Quote the literal file kind so it is not parsed as command output.
+            SOURCE="$2"; SOURCE_KIND='file'; shift 2 ;;
         --target)
             [ "$#" -ge 2 ] || { usage >&2; exit 2; }
             TARGET=$2; shift 2 ;;

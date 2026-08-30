@@ -1,0 +1,13 @@
+#!/bin/sh
+# Serve a read-only downscaled framebuffer snapshot over HTTP.
+set -eu
+
+ROOT=${VITA_FBSERVE_ROOT:-/opt/vita-toolkit}
+BINARY=${VITA_FBSERVE_BINARY:-$ROOT/libexec/vita-fbserve.arm}
+
+[ -x "$BINARY" ] || {
+    printf 'vita-fbserve: server binary is not executable: %s\n' "$BINARY" >&2
+    exit 1
+}
+
+exec "$BINARY" "$@"
