@@ -40,7 +40,11 @@ Attract mode changes scenes every eight seconds.
 
 ## Controls
 
-- Any key event from `/dev/input/event0`: advance one scene and hold it briefly.
+- A press from the discovered Vita syscon controller advances one scene and
+  holds it briefly. Discovery prefers the controller identity and does not
+  assume a fixed `/dev/input/eventN` registration order.
+- If the Vita controller is absent, the lowest-numbered key-capable evdev
+  source is used as a keyboard fallback.
 - `SIGUSR1` to the process: advance one scene and hold it for deterministic
   capture (`kill -USR1 $(cat /run/pstv-demo-cart.pid)`).
 - `Esc` or `Q` from a compatible keyboard event source: exit.

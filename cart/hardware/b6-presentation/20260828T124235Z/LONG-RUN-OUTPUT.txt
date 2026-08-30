@@ -1,0 +1,20 @@
+stopped /usr/local/bin/pstv-demo-cart (pid 22250)
+PSTV Demo Cart stopped; framebuffer console restored
+PSTV Demo Cart running (pid 28242); log: /run/pstv-demo-cart-b6-long.log
+candidate_alive_after_60s=1
+=== candidate long-run log ===
+input sources connected
+frames=300 scene=1 fps=30.09 dropped=0
+frames=600 scene=2 fps=27.87 dropped=0
+frames=900 scene=3 fps=29.79 dropped=0
+frames=1200 scene=5 fps=30.01 dropped=0
+frames=1500 scene=0 fps=30.00 dropped=0
+frames=1800 scene=1 fps=30.00 dropped=0
+stopped /tmp/pstv-demo-cart-b6-presentation (pid 28242)
+PSTV Demo Cart stopped; framebuffer console restored
+PSTV Demo Cart running (pid 28289); log: /run/pstv-demo-cart.log
+restored_known_good=1
+final_pid=28289
+final_exe=/usr/local/bin/pstv-demo-cart
+final_fbcon=0
+final_online=0-3

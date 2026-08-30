@@ -6,15 +6,26 @@ CART_DIR := .
 SRC := $(CART_DIR)/src/pstv-demo-cart.c
 CANVAS_SRC := $(CART_DIR)/src/canvas.c
 RUNTIME_SRC := $(CART_DIR)/src/runtime.c
+INPUT_SRC := $(CART_DIR)/src/input_evdev.c
+NORMALIZE_SRC := $(CART_DIR)/src/input_normalize.c
+ACTIONS_SRC := $(CART_DIR)/src/input_actions.c
 WORKER_POOL_SRC := $(CART_DIR)/src/worker_pool.c
+TRANSITION_SRC := $(CART_DIR)/src/transition.c
+PRESENTATION_SRC := $(CART_DIR)/src/presentation.c
 SCENE_SRCS := $(CART_DIR)/src/scenes_builtin.c $(CART_DIR)/scenes/scene_2d_legacy.c
-SRCS := $(SRC) $(CANVAS_SRC) $(RUNTIME_SRC) $(WORKER_POOL_SRC) $(SCENE_SRCS)
+SRCS := $(SRC) $(CANVAS_SRC) $(RUNTIME_SRC) $(INPUT_SRC) $(NORMALIZE_SRC) $(ACTIONS_SRC) $(WORKER_POOL_SRC) $(TRANSITION_SRC) $(PRESENTATION_SRC) $(SCENE_SRCS)
 BUILD_DIR := $(CART_DIR)/build
 HOST_BIN := $(BUILD_DIR)/pstv-demo-cart.host-sanitize
 CANVAS_TEST_BIN := $(BUILD_DIR)/test-canvas
 SCENE_REGISTRY_TEST_BIN := $(BUILD_DIR)/test-scene-registry
 RUNTIME_TEST_BIN := $(BUILD_DIR)/test-runtime
+INPUT_TEST_BIN := $(BUILD_DIR)/test-input
+INPUT_ACTIONS_TEST_BIN := $(BUILD_DIR)/test-input-actions
+INPUT_NORMALIZE_TEST_BIN := $(BUILD_DIR)/test-input-normalize
 WORKER_POOL_TEST_BIN := $(BUILD_DIR)/test-worker-pool
+PHOTOSENS_TEST_BIN := $(BUILD_DIR)/test-photosensitivity
+TRANSITION_TEST_BIN := $(BUILD_DIR)/test-transition
+PRESENTATION_TEST_BIN := $(BUILD_DIR)/test-presentation
 CAPTURE_SRC := $(BUILD_DIR)/capture-host.c
 CAPTURE_BIN := $(BUILD_DIR)/capture-host
 FIXTURES := $(CART_DIR)/tests/fixtures
@@ -30,7 +41,7 @@ TARGET_BIN := $(BUILD_DIR)/pstv-demo-cart.arm
 PRODUCTION_SRC := $(CART_DIR)/provenance/v0.1/pstv-demo-cart.c
 PRODUCTION_BIN := $(BUILD_DIR)/pstv-demo-cart.v0.1.arm
 
-.PHONY: all host-sanitize test-canvas test-scene-registry test-runtime test-runtime-loop test-worker-pool host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
+.PHONY: all host-sanitize test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-input-normalize test-worker-pool test-photosensitivity test-transition test-presentation test-capture-flash-check host-capture capture cross-build cross-verify test complete-test verify-production clean FORCE
 
 FORCE:
 
@@ -38,7 +49,7 @@ all: host-sanitize
 
 host-sanitize: $(HOST_BIN)
 
-$(HOST_BIN): $(SRC) FORCE $(CANVAS_SRC) $(RUNTIME_SRC) $(SCENE_SRCS)
+$(HOST_BIN): $(SRC) FORCE $(SRCS)
 	@mkdir -p "$(BUILD_DIR)"
 	"$(CC)" $(HOST_CFLAGS) $(SRCS) $(HOST_LDFLAGS) -pthread -lm -o "$@"
 
@@ -51,8 +62,41 @@ test-scene-registry: $(SCENE_REGISTRY_TEST_BIN)
 test-runtime: $(RUNTIME_TEST_BIN)
 	"$(RUNTIME_TEST_BIN)"
 
+test-input: $(INPUT_TEST_BIN)
+	"$(INPUT_TEST_BIN)"
+
+test-input-actions: $(INPUT_ACTIONS_TEST_BIN)
+	"$(INPUT_ACTIONS_TEST_BIN)"
+
+test-input-normalize: $(INPUT_NORMALIZE_TEST_BIN)
+	"$(INPUT_NORMALIZE_TEST_BIN)"
+
 test-worker-pool: $(WORKER_POOL_TEST_BIN)
 	"$(WORKER_POOL_TEST_BIN)"
+
+test-photosensitivity: $(PHOTOSENS_TEST_BIN)
+	"$(PHOTOSENS_TEST_BIN)"
+
+test-transition: $(TRANSITION_TEST_BIN)
+	"$(TRANSITION_TEST_BIN)"
+
+test-presentation: $(PRESENTATION_TEST_BIN)
+	"$(PRESENTATION_TEST_BIN)"
+
+test-capture-flash-check:
+	"$(SHELL)" "$(CART_DIR)/tests/test_capture_flash_check.sh" "$(CART_DIR)"
+
+$(PHOTOSENS_TEST_BIN): $(CART_DIR)/tests/test_photosensitivity.c $(CANVAS_SRC) $(TRANSITION_SRC) $(SCENE_SRCS) $(CART_DIR)/include/cart/transition.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_photosensitivity.c" $(CANVAS_SRC) $(TRANSITION_SRC) $(SCENE_SRCS) $(HOST_LDFLAGS) -lm -o "$@"
+
+$(TRANSITION_TEST_BIN): $(CART_DIR)/tests/test_transition.c $(TRANSITION_SRC) $(CANVAS_SRC) $(CART_DIR)/include/cart/transition.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_transition.c" $(TRANSITION_SRC) $(CANVAS_SRC) $(HOST_LDFLAGS) -o "$@"
+
+$(PRESENTATION_TEST_BIN): $(CART_DIR)/tests/test_presentation.c $(PRESENTATION_SRC) $(CART_DIR)/include/cart/presentation.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_presentation.c" $(PRESENTATION_SRC) $(HOST_LDFLAGS) -o "$@"
 
 test-runtime-loop:
 	"$(SHELL)" "$(CART_DIR)/tests/test_runtime_loop.sh" "$(SRC)"
@@ -60,6 +104,18 @@ test-runtime-loop:
 $(RUNTIME_TEST_BIN): $(CART_DIR)/tests/test_runtime.c $(RUNTIME_SRC) $(CART_DIR)/include/cart/runtime.h FORCE
 	@mkdir -p "$(BUILD_DIR)"
 	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_runtime.c" "$(RUNTIME_SRC)" $(HOST_LDFLAGS) -o "$@"
+
+$(INPUT_TEST_BIN): $(CART_DIR)/tests/test_input.c $(INPUT_SRC) $(NORMALIZE_SRC) $(ACTIONS_SRC) $(CART_DIR)/include/cart/input.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_input.c" "$(INPUT_SRC)" "$(NORMALIZE_SRC)" "$(ACTIONS_SRC)" $(HOST_LDFLAGS) -o "$@"
+
+$(INPUT_ACTIONS_TEST_BIN): $(CART_DIR)/tests/test_input_actions.c $(CART_DIR)/src/input_actions.c $(CART_DIR)/include/cart/input_actions.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_input_actions.c" "$(CART_DIR)/src/input_actions.c" $(HOST_LDFLAGS) -o "$@"
+
+$(INPUT_NORMALIZE_TEST_BIN): $(CART_DIR)/tests/test_input_normalize.c $(CART_DIR)/src/input_normalize.c $(CART_DIR)/include/cart/input_normalize.h FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_input_normalize.c" "$(CART_DIR)/src/input_normalize.c" $(HOST_LDFLAGS) -o "$@"
 
 $(WORKER_POOL_TEST_BIN): $(CART_DIR)/tests/test_worker_pool.c $(WORKER_POOL_SRC) $(CART_DIR)/include/cart/worker_pool.h FORCE
 	@mkdir -p "$(BUILD_DIR)"
@@ -74,9 +130,9 @@ $(CANVAS_TEST_BIN): $(CART_DIR)/tests/test_canvas.c $(CANVAS_SRC) $(CART_DIR)/in
 	"$(CC)" $(HOST_CFLAGS) "$(CART_DIR)/tests/test_canvas.c" "$(CANVAS_SRC)" $(HOST_LDFLAGS) -o "$@"
 
 ifeq ($(CAPTURE_SRC),$(DEFAULT_CAPTURE_SRC))
-$(CAPTURE_SRC): $(SRC) FORCE $(CANVAS_SRC) $(RUNTIME_SRC) $(WORKER_POOL_SRC) $(SCENE_SRCS)
+$(CAPTURE_SRC): $(SRC) FORCE $(SRCS)
 	@mkdir -p "$(BUILD_DIR)"
-	@printf '%s\n' '#define _GNU_SOURCE' '#define main pstv_demo_cart_production_main' '#include "../src/canvas.c"' '#include "../src/runtime.c"' '#include "../src/worker_pool.c"' '#include "../scenes/scene_2d_legacy.c"' '#include "../src/scenes_builtin.c"' '#include "../src/pstv-demo-cart.c"' '#undef main' '#include <stdint.h>' '#include <stdio.h>' '#include <stdlib.h>' '' 'static int dump_logical(const char *path)' '{' '    FILE *f = fopen(path, "wb");' '    if (!f) { perror(path); return 1; }' '    if (fprintf(f, "P6\n%d %d\n255\n", LW, LH) < 0) { fclose(f); return 1; }' '    for (int y = 0; y < LH; y++)' '        for (int x = 0; x < LW; x++) {' '            uint32_t c = low[y * LW + x];' '            uint8_t p[3] = { c & 255, (c >> 8) & 255, (c >> 16) & 255 };' '            if (fwrite(p, 1, sizeof(p), f) != sizeof(p)) { fclose(f); return 1; }' '        }' '    return fclose(f) != 0;' '}' 'int main(int argc, char **argv)' '{' '    if (argc != 4) { fprintf(stderr, "usage: %s SCENE FRAME OUTPUT\n", argv[0]); return 2; }' '    if (cart_scenes_init() != 0) { return 1; }' '    render_frame(atoi(argv[1]) % SCENES, atoi(argv[2]));' '    return dump_logical(argv[3]);' '}' > "$@"
+	@printf '%s\n' '#define _GNU_SOURCE' '#define main pstv_demo_cart_production_main' '#include "../src/canvas.c"' '#include "../src/runtime.c"' '#include "../src/input_evdev.c"' '#include "../src/input_normalize.c"' '#include "../src/input_actions.c"' '#include "../src/worker_pool.c"' '#include "../src/transition.c"' '#include "../src/presentation.c"' '#include "../scenes/scene_2d_legacy.c"' '#include "../src/scenes_builtin.c"' '#include "../src/pstv-demo-cart.c"' '#undef main' '#include <stdint.h>' '#include <stdio.h>' '#include <stdlib.h>' '' 'static int dump_logical(const char *path)' '{' '    FILE *f = fopen(path, "wb");' '    if (!f) { perror(path); return 1; }' '    if (fprintf(f, "P6\n%d %d\n255\n", LW, LH) < 0) { fclose(f); return 1; }' '    for (int y = 0; y < LH; y++)' '        for (int x = 0; x < LW; x++) {' '            uint32_t c = low[y * LW + x];' '            uint8_t p[3] = { c & 255, (c >> 8) & 255, (c >> 16) & 255 };' '            if (fwrite(p, 1, sizeof(p), f) != sizeof(p)) { fclose(f); return 1; }' '        }' '    return fclose(f) != 0;' '}' 'int main(int argc, char **argv)' '{' '    if (argc != 4) { fprintf(stderr, "usage: %s SCENE FRAME OUTPUT\n", argv[0]); return 2; }' '    if (cart_scenes_init() != 0) { return 1; }' '    render_frame(atoi(argv[1]) % SCENES, atoi(argv[2]));' '    return dump_logical(argv[3]);' '}' > "$@"
 
 $(CAPTURE_BIN): $(CAPTURE_SRC) FORCE
 	"$(CC)" $(HOST_CFLAGS) "$(CAPTURE_SRC)" $(HOST_LDFLAGS) -pthread -lm -o "$@"
@@ -211,7 +267,7 @@ cross-verify: cross-build
 	@readelf -h "$(TARGET_BIN)" | grep -q 'Flags:.*hard-float ABI'
 	@if readelf -l "$(TARGET_BIN)" | grep -q 'INTERP'; then printf '%s\n' 'FAIL cross-verify: dynamic interpreter present' >&2; exit 1; fi
 
-test: test-canvas test-scene-registry test-runtime test-runtime-loop test-worker-pool host-sanitize host-capture
+test: test-canvas test-scene-registry test-runtime test-runtime-loop test-input test-input-actions test-input-normalize test-worker-pool test-photosensitivity test-transition test-presentation test-capture-flash-check host-sanitize host-capture
 	"$(SHELL)" "$(CART_DIR)/tests/test_legacy_render.sh" --verify-only --compare-to "$(GENERATED_FIXTURES)"
 	@if [ "$${CART_IMMUTABILITY_GUARD:-}" != child ] && [ -z "$${CART_SKIP_IMMUTABILITY:-}" ]; then \
 		CART_IMMUTABILITY_GUARD=child CART_SKIP_IMMUTABILITY=1 \

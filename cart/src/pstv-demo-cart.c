@@ -1,13 +1,15 @@
 #define _GNU_SOURCE
 #include <cart/canvas.h>
+#include <cart/input.h>
 #include <cart/runtime.h>
 #include <cart/scene.h>
+#include <cart/transition.h>
+#include <cart/presentation.h>
 #include <cart/worker_pool.h>
 
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fb.h>
-#include <linux/input.h>
 #include <math.h>
 #include <signal.h>
 #include <stdint.h>
@@ -45,6 +47,21 @@ static struct cart_scene_render_context row_contexts[CART_WORKER_POOL_MAX];
 static void *row_slots[CART_WORKER_POOL_MAX];
 static const struct cart_scene *row_scene;
 static struct cart_worker_pool render_pool;
+
+/* Crossfade staging. Scene changes are never hard cuts: the outgoing and
+ * incoming scenes are rendered into these buffers and blended into `low`
+ * over CART_TRANSITION_FRAMES. See
+ * docs/plans/2026-08-27-pstv-transition-flash-repair.md. */
+static uint32_t low_from[LW * LH];
+static uint32_t low_to[LW * LH];
+static struct cart_transition transition;
+static size_t displayed_scene;
+static uint32_t display_row[FW];
+
+/* The simplefb driver has no page flip or vsync ioctl. Presentation therefore
+ * uses one linear write-combining sweep per completed logical frame. A second
+ * full-frame DRAM staging copy measured at ~15 FPS on the PSTV, so it is not
+ * a viable mitigation; the true atomic fix remains a real display driver. */
 
 static void row_job(void *slot, int row_start, int row_end, uint64_t frame)
 {
@@ -91,13 +108,17 @@ static void render_frame(int which, uint64_t frame)
     selected->render(&overlay_context);
 }
 
-static void upscale(uint32_t *dst)
+/* Render a specific scene into a specific buffer. render_frame() binds every
+ * active context to &low_canvas at dispatch time, so retargeting the canvas
+ * pixel pointer around the call redirects the whole pipeline, workers
+ * included. */
+static void render_scene_into(uint32_t *destination, int which, uint64_t frame)
 {
-    uint32_t row[FW];
-    for(int y=0;y<LH;y++){
-        for(int x=0;x<LW;x++) for(int k=0;k<SCALE;k++) row[x*SCALE+k]=low[y*LW+x];
-        for(int k=0;k<SCALE;k++) memcpy(dst+(y*SCALE+k)*FW,row,sizeof(row));
-    }
+    uint32_t *saved = low_canvas.pixels;
+
+    low_canvas.pixels = destination;
+    render_frame(which, frame);
+    low_canvas.pixels = saved;
 }
 
 static int dump_ppm(const char *path)
@@ -165,11 +186,16 @@ int main(int argc,char **argv)
     if(ioctl(fd,FBIOGET_VSCREENINFO,&v)||ioctl(fd,FBIOGET_FSCREENINFO,&fix)){perror("fb ioctl");return 1;}
     if(v.xres!=FW||v.yres!=FH||v.bits_per_pixel!=32||fix.line_length!=FW*4){fprintf(stderr,"unexpected fb %ux%u %ubpp stride %u\n",v.xres,v.yres,v.bits_per_pixel,fix.line_length);return 1;}
     uint32_t *fb=mmap(NULL,FW*FH*4,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0); if(fb==MAP_FAILED){perror("mmap");return 1;}
-    int infd=open("/dev/input/event0",O_RDONLY|O_NONBLOCK);
+    struct cart_input input;
+    if (cart_input_init(&input, "/sys/class/input", "/dev/input") < 0)
+        perror("input discovery");
+    else if (input.source[0].fd >= 0 || input.source[1].fd >= 0 ||
+             input.source[2].fd >= 0 || input.source[3].fd >= 0)
+        fprintf(stderr, "input sources connected\n");
     uint64_t now_ns;
     if (monotonic_now_ns(&now_ns) != 0) {
         perror("clock_gettime");
-        if (infd >= 0) close(infd);
+        cart_input_shutdown(&input);
         munmap(fb, FW * FH * 4);
         close(fd);
         return 1;
@@ -179,20 +205,23 @@ int main(int argc,char **argv)
         row_slots[index] = &row_contexts[index];
     if (cart_worker_pool_init(&render_pool, RENDER_THREADS, LH) != 0) {
         fprintf(stderr, "worker pool initialization failed\n");
-        if (infd >= 0) close(infd);
+        cart_input_shutdown(&input);
         munmap(fb, FW * FH * 4);
         close(fd);
         return 1;
     }
     if (cart_runtime_init(&runtime, cart_scene_count(), now_ns,
                           UINT64_C(1000000000) / FPS,
-                          UINT64_C(8) * UINT64_C(1000000000)) != 0) {
+                          UINT64_C(8) * UINT64_C(1000000000),
+                          CART_RUNTIME_MIN_CHANGE_NS) != 0) {
         fprintf(stderr, "runtime initialization failed\n");
-        if (infd >= 0) close(infd);
+        cart_input_shutdown(&input);
         munmap(fb, FW * FH * 4);
         close(fd);
         return 1;
     }
+    displayed_scene = runtime.scene_index;
+    memset(&transition, 0, sizeof(transition));
     uint64_t report_start_ns=now_ns;
     uint64_t report_frame=0;
     uint64_t rendered_frames=0;
@@ -210,12 +239,52 @@ int main(int argc,char **argv)
                                       UINT64_C(3600) * UINT64_C(1000000000));
             next_scene_requested=0;
         }
-        if(infd>=0){struct input_event ev; while(read(infd,&ev,sizeof(ev))==(ssize_t)sizeof(ev)) if(ev.type==EV_KEY&&ev.value==1){
-            if(ev.code==KEY_ESC||ev.code==KEY_Q)running=0;
-            else cart_runtime_request_next(&runtime, now_ns,
+        {
+            enum cart_input_action polled = CART_INPUT_NONE;
+            struct cart_input_frame frame;
+
+            if (cart_input_poll(&input, &polled, &frame) != 0) {
+                perror("input poll");
+                cart_input_shutdown(&input);
+            } else if (polled == CART_INPUT_QUIT) {
+                running = 0;
+            } else if (polled == CART_INPUT_NEXT) {
+                cart_runtime_request_next(&runtime, now_ns,
                                            UINT64_C(8) * UINT64_C(1000000000));
-        }}
-        render_frame((int)runtime.scene_index, runtime.frame); upscale(fb); rendered_frames++;
+            } else if (polled == CART_INPUT_PREVIOUS) {
+                cart_runtime_request_previous(&runtime, now_ns,
+                                               UINT64_C(8) * UINT64_C(1000000000));
+            }
+        }
+        /* Begin a fade whenever the runtime selects a different scene.
+         * A fade already in flight is never interrupted — the rate limiter
+         * in cart_runtime guarantees the next change cannot arrive before
+         * this one completes. Sample both endpoints once: rendering both
+         * scenes on every fade frame cuts the target's frame rate in half. */
+        if (runtime.scene_index != displayed_scene &&
+            !cart_transition_active(&transition)) {
+            cart_transition_begin(&transition, displayed_scene,
+                                  runtime.scene_index);
+            if (cart_transition_sources_need_render(&transition)) {
+                render_scene_into(low_from, (int)transition.from_scene,
+                                  runtime.frame);
+                render_scene_into(low_to, (int)transition.to_scene,
+                                  runtime.frame);
+                cart_transition_mark_sources_rendered(&transition);
+            }
+        }
+        if (cart_transition_active(&transition)) {
+            cart_transition_blend(&transition, low, low_from, low_to,
+                                  (size_t)(LW * LH),
+                                  transition.elapsed_frames);
+            cart_transition_advance(&transition);
+            if (!cart_transition_active(&transition))
+                displayed_scene = transition.to_scene;
+        } else {
+            render_frame((int)displayed_scene, runtime.frame);
+        }
+        cart_presentation_upscale(fb, low, display_row);
+        rendered_frames++;
         if(rendered_frames-report_frame>=300){
             uint64_t elapsed_ns=now_ns-report_start_ns;
             double elapsed=(double)elapsed_ns/1e9;
@@ -243,7 +312,7 @@ int main(int argc,char **argv)
         }
     }
     cart_worker_pool_shutdown(&render_pool);
-    if(infd>=0)close(infd);
+    cart_input_shutdown(&input);
     munmap(fb,FW*FH*4);
     close(fd);
     return 0;

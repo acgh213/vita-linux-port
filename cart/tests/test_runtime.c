@@ -20,12 +20,29 @@ static void expect(int condition, const char *message)
         fail(message);
 }
 
+/* Photosensitivity guard used by the rate-limit tests. Smaller than
+ * SCENE_PERIOD so automatic rotation is still exercised normally. */
+#define GUARD (3 * STEP)
+
+/* Unguarded runtime: cooldown 0 preserves the original stepping semantics
+ * these tests were written against. */
 static struct cart_runtime fresh_runtime(void)
 {
     struct cart_runtime runtime;
 
-    expect(cart_runtime_init(&runtime, 6, START, STEP, SCENE_PERIOD) == 0,
+    expect(cart_runtime_init(&runtime, 6, START, STEP, SCENE_PERIOD, 0) == 0,
            "runtime initialization");
+    return runtime;
+}
+
+/* Guarded runtime: scene changes are rate limited to one per GUARD. */
+static struct cart_runtime guarded_runtime(void)
+{
+    struct cart_runtime runtime;
+
+    expect(cart_runtime_init(&runtime, 6, START, STEP, SCENE_PERIOD,
+                             GUARD) == 0,
+           "guarded runtime initialization");
     return runtime;
 }
 
@@ -70,6 +87,78 @@ static void test_scene_timeout_and_manual_hold(void)
     expect(!runtime.manual_hold_active, "manual hold expires exactly at deadline");
 }
 
+static void test_request_previous_wraps_to_last_scene(void)
+{
+    struct cart_runtime runtime = fresh_runtime();
+
+    cart_runtime_tick(&runtime, START);
+    expect(runtime.scene_index == 0, "origin starts at first scene");
+    cart_runtime_request_previous(&runtime, START, 0);
+    expect(runtime.scene_index == 5, "previous from first scene wraps to last");
+    expect(runtime.manual_scene_index == 5,
+           "previous records the manual scene index");
+}
+
+static void test_request_previous_steps_backward(void)
+{
+    struct cart_runtime runtime = fresh_runtime();
+
+    cart_runtime_tick(&runtime, START + 3 * SCENE_PERIOD);
+    expect(runtime.scene_index == 3, "automatic scene advances by period");
+    cart_runtime_request_previous(&runtime, START + 3 * SCENE_PERIOD, 0);
+    expect(runtime.scene_index == 2, "previous steps back one scene");
+    cart_runtime_request_previous(&runtime, START + 3 * SCENE_PERIOD, 0);
+    expect(runtime.scene_index == 1, "previous steps back another scene");
+}
+
+static void test_request_previous_hold_pins_like_next(void)
+{
+    struct cart_runtime runtime = fresh_runtime();
+
+    cart_runtime_tick(&runtime, START + 2 * SCENE_PERIOD);
+    expect(runtime.scene_index == 2, "automatic scene reaches index two");
+    cart_runtime_request_previous(&runtime, START + 2 * SCENE_PERIOD,
+                                  2 * SCENE_PERIOD);
+    expect(runtime.scene_index == 1, "manual previous steps back one scene");
+    expect(runtime.manual_hold_active, "manual previous enables hold");
+
+    cart_runtime_tick(&runtime, START + 4 * SCENE_PERIOD - 1);
+    expect(runtime.scene_index == 1, "manual previous holds across auto boundary");
+    expect(runtime.manual_hold_active, "previous hold remains active before deadline");
+
+    cart_runtime_tick(&runtime, START + 4 * SCENE_PERIOD);
+    expect(runtime.scene_index == 4, "automatic scene is recomputed at hold timeout");
+    expect(!runtime.manual_hold_active, "previous hold expires exactly at deadline");
+}
+
+static void test_request_previous_without_hold_does_not_pin(void)
+{
+    struct cart_runtime runtime = fresh_runtime();
+
+    cart_runtime_tick(&runtime, START + 3 * SCENE_PERIOD);
+    cart_runtime_request_previous(&runtime, START + 3 * SCENE_PERIOD, 0);
+    expect(runtime.scene_index == 2, "previous without hold still steps back");
+    expect(!runtime.manual_hold_active, "previous without hold does not pin");
+
+    cart_runtime_tick(&runtime, START + 3 * SCENE_PERIOD + STEP);
+    expect(runtime.scene_index == 3, "attract resumes on the next tick");
+}
+
+static void test_request_previous_safety(void)
+{
+    struct cart_runtime runtime;
+
+    cart_runtime_request_previous(NULL, START, SCENE_PERIOD);
+
+    expect(cart_runtime_init(&runtime, 1, START, STEP, SCENE_PERIOD, 0) == 0,
+           "single scene runtime initialization");
+    cart_runtime_tick(&runtime, START + 2 * SCENE_PERIOD);
+    cart_runtime_request_previous(&runtime, START + 2 * SCENE_PERIOD,
+                                  SCENE_PERIOD);
+    expect(runtime.scene_index == 0, "previous on single scene stays at zero");
+    expect(runtime.manual_hold_active, "single scene previous still honors hold");
+}
+
 static void test_one_frame_overrun_keeps_schedule(void)
 {
     struct cart_runtime runtime = fresh_runtime();
@@ -98,16 +187,16 @@ static void test_no_negative_sleep_or_invalid_configuration(void)
 {
     struct cart_runtime runtime;
 
-    expect(cart_runtime_init(NULL, 6, START, STEP, SCENE_PERIOD) != 0,
+    expect(cart_runtime_init(NULL, 6, START, STEP, SCENE_PERIOD, 0) != 0,
            "null runtime rejected");
-    expect(cart_runtime_init(&runtime, 0, START, STEP, SCENE_PERIOD) != 0,
+    expect(cart_runtime_init(&runtime, 0, START, STEP, SCENE_PERIOD, 0) != 0,
            "zero scene count rejected");
-    expect(cart_runtime_init(&runtime, 6, START, 0, SCENE_PERIOD) != 0,
+    expect(cart_runtime_init(&runtime, 6, START, 0, SCENE_PERIOD, 0) != 0,
            "zero frame period rejected");
-    expect(cart_runtime_init(&runtime, 6, START, STEP, 0) != 0,
+    expect(cart_runtime_init(&runtime, 6, START, STEP, 0, 0) != 0,
            "zero scene period rejected");
     expect(cart_runtime_init(&runtime, 6, UINT64_MAX - 2 * STEP, STEP,
-                             SCENE_PERIOD) == 0,
+                             SCENE_PERIOD, 0) == 0,
            "origin with one representable deadline accepted");
     expect(cart_runtime_tick(&runtime, UINT64_MAX - STEP) == 0,
            "last representable deadline is usable");
@@ -120,6 +209,100 @@ static void test_no_negative_sleep_or_invalid_configuration(void)
            "successful tick always returns a positive bounded sleep");
 }
 
+static void test_manual_change_rate_limited(void)
+{
+    struct cart_runtime runtime = guarded_runtime();
+    size_t previous;
+    int cuts = 0;
+
+    /* Ten requests spread over a window shorter than the guard must not
+     * produce ten scene changes. WCAG general-flash limit is 3/sec. */
+    cart_runtime_tick(&runtime, START);
+    previous = runtime.scene_index;
+    for (int index = 0; index < 10; index++) {
+        uint64_t now = START + (uint64_t)index * (GUARD / 10);
+
+        cart_runtime_tick(&runtime, now);
+        cart_runtime_request_next(&runtime, now, SCENE_PERIOD);
+        if (runtime.scene_index != previous)
+            cuts++;
+        previous = runtime.scene_index;
+    }
+    expect(cuts <= 1, "ten rapid requests inside the guard yield at most one cut");
+}
+
+static void test_rate_limit_releases_after_interval(void)
+{
+    struct cart_runtime runtime = guarded_runtime();
+    size_t first;
+
+    cart_runtime_tick(&runtime, START);
+    cart_runtime_request_next(&runtime, START, SCENE_PERIOD);
+    first = runtime.scene_index;
+    expect(first == 1, "first request is honoured immediately");
+
+    /* Still inside the cooldown: suppressed. */
+    cart_runtime_request_next(&runtime, START + STEP, SCENE_PERIOD);
+    expect(runtime.scene_index == first, "request inside cooldown is suppressed");
+
+    /* Exactly at the cooldown boundary: honoured again. */
+    cart_runtime_request_next(&runtime, START + GUARD, SCENE_PERIOD);
+    expect(runtime.scene_index == 2, "request at the cooldown boundary is honoured");
+}
+
+static void test_rate_limit_applies_to_previous(void)
+{
+    struct cart_runtime runtime = guarded_runtime();
+    size_t first;
+
+    cart_runtime_tick(&runtime, START);
+    cart_runtime_request_previous(&runtime, START, SCENE_PERIOD);
+    first = runtime.scene_index;
+    expect(first == 5, "first previous wraps to the last scene");
+
+    cart_runtime_request_previous(&runtime, START + STEP, SCENE_PERIOD);
+    expect(runtime.scene_index == first,
+           "previous inside cooldown is suppressed");
+}
+
+static void test_zero_guard_preserves_legacy_stepping(void)
+{
+    struct cart_runtime runtime = fresh_runtime();
+
+    /* A zero cooldown must behave exactly as before: repeated requests at
+     * an identical timestamp still step. */
+    cart_runtime_tick(&runtime, START + 3 * SCENE_PERIOD);
+    cart_runtime_request_previous(&runtime, START + 3 * SCENE_PERIOD, 0);
+    expect(runtime.scene_index == 2, "zero guard still steps back once");
+    cart_runtime_request_previous(&runtime, START + 3 * SCENE_PERIOD, 0);
+    expect(runtime.scene_index == 1, "zero guard still steps back twice");
+}
+
+static void test_auto_rotation_respects_recent_manual_change(void)
+{
+    struct cart_runtime runtime = guarded_runtime();
+
+    /* Step BACKWARD shortly before the automatic boundary, without a hold.
+     * Manual lands on scene 5 while the attract loop is about to select
+     * scene 1, so the two genuinely diverge and the test cannot pass by
+     * coincidence. */
+    cart_runtime_tick(&runtime, START + SCENE_PERIOD - STEP);
+    expect(runtime.scene_index == 0, "attract loop is on scene zero before boundary");
+    cart_runtime_request_previous(&runtime, START + SCENE_PERIOD - STEP, 0);
+    expect(runtime.scene_index == 5, "manual previous wraps to the last scene");
+
+    /* Crossing the automatic boundary inside the cooldown must not cut
+     * again — that would be two flashes in rapid succession. */
+    cart_runtime_tick(&runtime, START + SCENE_PERIOD);
+    expect(runtime.scene_index == 5,
+           "auto rotation defers while inside the change cooldown");
+
+    /* Once the cooldown expires the attract loop resumes normally. */
+    cart_runtime_tick(&runtime, START + SCENE_PERIOD - STEP + GUARD);
+    expect(runtime.scene_index == 1,
+           "auto rotation resumes after the cooldown expires");
+}
+
 int main(void)
 {
     test_fixed_step_progression();
@@ -127,6 +310,16 @@ int main(void)
     test_one_frame_overrun_keeps_schedule();
     test_multi_frame_overrun_resynchronizes();
     test_no_negative_sleep_or_invalid_configuration();
+    test_request_previous_wraps_to_last_scene();
+    test_request_previous_steps_backward();
+    test_request_previous_hold_pins_like_next();
+    test_request_previous_without_hold_does_not_pin();
+    test_request_previous_safety();
+    test_manual_change_rate_limited();
+    test_rate_limit_releases_after_interval();
+    test_rate_limit_applies_to_previous();
+    test_zero_guard_preserves_legacy_stepping();
+    test_auto_rotation_respects_recent_manual_change();
     printf("all runtime tests passed\n");
     return 0;
 }
