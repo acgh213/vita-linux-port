@@ -1,0 +1,7 @@
+diff --git a/linux_vita b/linux_vita
+index ed91f5c..8017108 160000
+--- a/linux_vita
++++ b/linux_vita
+@@ -1 +1 @@
+-Subproject commit ed91f5ce13d15bb2160f5621f49a618777b290d5
++Subproject commit 8017108b4f1cc534cf1303d53292ac25a87b57f8

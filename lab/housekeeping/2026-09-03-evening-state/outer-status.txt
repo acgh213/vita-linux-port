@@ -1,0 +1,6 @@
+## main...origin/main
+ M linux_vita
+?? dist/vita-toolkit-native-2026-09-02.squashfs
+?? lab/housekeeping/2026-09-03-evening-state/outer-status.txt
+?? lab/vita-toolkit-start-2026-09-02.md
+snapshot=verified
